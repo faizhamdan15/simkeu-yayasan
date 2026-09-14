@@ -21,6 +21,12 @@ let expenseCategories = [];
 let expenseRowsCache = [];
 let pendingExpenseSaveAction = "draft";
 
+let transferInstitutions = [];
+let transferAccounts = [];
+let transferBalances = [];
+let transferRowsCache = [];
+let pendingTransferSaveAction = "draft";
+
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
 }).format(Number(n||0));
@@ -746,6 +752,341 @@ async function viewExpenseProof(id){
   window.open(data.signedUrl,"_blank","noopener,noreferrer");
 }
 
+
+/* =========================================================
+   MODUL TRANSFER INTERNAL
+   ========================================================= */
+
+async function loadTransferModule(){
+  try{
+    $("transferTransactionsBody").innerHTML=`<tr><td colspan="7" class="empty">Memuat...</td></tr>`;
+
+    const [instRes, accountRes, balanceRes] = await Promise.all([
+      sb.from("institutions").select("id,code,name,institution_type").eq("is_active",true).order("name"),
+      sb.from("accounts").select("id,institution_id,account_name,account_type,bank_name,is_active").eq("is_active",true).order("account_name"),
+      sb.from("v_account_balances").select("account_id,institution_id,institution_name,account_name,current_balance")
+    ]);
+    [instRes,accountRes,balanceRes].forEach(r=>{if(r.error)throw r.error});
+
+    transferInstitutions=instRes.data||[];
+    transferAccounts=accountRes.data||[];
+    transferBalances=balanceRes.data||[];
+
+    fillTransferMasterOptions();
+    if(!$("transferDate").value) $("transferDate").value=todayISO();
+
+    // Admin lembaga boleh membaca transfer yang menyentuh akunnya, tetapi tidak membuat transfer baru.
+    const canCreate=isCentralUser();
+    [
+      "transferDate","transferSourceInstitution","transferSourceAccount",
+      "transferDestinationInstitution","transferDestinationAccount",
+      "transferAmount","transferDescription","saveTransferDraftBtn","saveTransferSubmitBtn"
+    ].forEach(id=>{
+      const node=$(id);
+      if(node) node.disabled=!canCreate || (["transferSourceAccount","transferDestinationAccount"].includes(id) && !node.value);
+    });
+
+    $("newTransferBtn").style.display=canCreate ? "" : "none";
+
+    const existing=$("transferFormCard").querySelector(".central-only-note");
+    if(!canCreate && !existing){
+      const note=document.createElement("div");
+      note.className="central-only-note";
+      note.textContent="Akun lembaga dapat melihat transfer yang berkaitan dengan lembaganya, tetapi pembuatan transfer baru hanya dapat dilakukan oleh Yayasan.";
+      $("transferFormCard").prepend(note);
+    }
+
+    await loadTransferTransactions();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat transfer internal: "+(err.message||"error"));
+  }
+}
+
+function fillTransferMasterOptions(){
+  const sourceInst=$("transferSourceInstitution");
+  const destInst=$("transferDestinationInstitution");
+  const options=`<option value="">Pilih lembaga</option>`+
+    transferInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+
+  sourceInst.innerHTML=options;
+  destInst.innerHTML=options;
+
+  $("transferSourceAccount").innerHTML=`<option value="">Pilih kas/bank sumber</option>`;
+  $("transferDestinationAccount").innerHTML=`<option value="">Pilih kas/bank tujuan</option>`;
+  $("transferSourceAccount").disabled=true;
+  $("transferDestinationAccount").disabled=true;
+  updateTransferBalanceHint();
+}
+
+function refreshTransferSourceAccounts(){
+  const institutionId=$("transferSourceInstitution").value;
+  const accountSelect=$("transferSourceAccount");
+  const rows=transferAccounts.filter(a=>a.institution_id===institutionId);
+
+  accountSelect.innerHTML=`<option value="">Pilih kas/bank sumber</option>`+
+    rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
+
+  accountSelect.disabled=!isCentralUser() || !institutionId || !rows.length;
+  updateTransferBalanceHint();
+  validateDifferentTransferAccounts();
+}
+
+function refreshTransferDestinationAccounts(){
+  const institutionId=$("transferDestinationInstitution").value;
+  const accountSelect=$("transferDestinationAccount");
+  const sourceId=$("transferSourceAccount").value;
+  const rows=transferAccounts.filter(a=>a.institution_id===institutionId && a.id!==sourceId);
+
+  accountSelect.innerHTML=`<option value="">Pilih kas/bank tujuan</option>`+
+    rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
+
+  accountSelect.disabled=!isCentralUser() || !institutionId || !rows.length;
+  validateDifferentTransferAccounts();
+}
+
+function validateDifferentTransferAccounts(){
+  const source=$("transferSourceAccount").value;
+  const dest=$("transferDestinationAccount").value;
+  if(source && dest && source===dest){
+    $("transferDestinationAccount").value="";
+    toast("Akun sumber dan tujuan transfer tidak boleh sama.");
+  }
+}
+
+function updateTransferBalanceHint(){
+  const sourceId=$("transferSourceAccount").value;
+  const amount=Number($("transferAmount").value||0);
+  const balanceRow=transferBalances.find(b=>b.account_id===sourceId);
+  const balance=Number(balanceRow?.current_balance||0);
+  const hint=$("transferSourceBalance");
+
+  hint.textContent=sourceId ? `Saldo tersedia: ${rupiah(balance)}` : "Saldo tersedia: —";
+  hint.classList.toggle("insufficient",!!sourceId && amount>balance);
+  if(sourceId && amount>balance){
+    hint.textContent=`Saldo tersedia: ${rupiah(balance)} — nominal transfer melebihi saldo`;
+  }
+}
+
+async function loadTransferTransactions(){
+  const {data,error}=await sb.from("transactions")
+    .select(`
+      id,
+      transaction_number,
+      transaction_date,
+      amount,
+      description,
+      status,
+      created_at,
+      institution_id,
+      source_account_id,
+      destination_account_id,
+      institutions:institution_id(name),
+      source_account:source_account_id(account_name,institution_id),
+      destination_account:destination_account_id(account_name,institution_id)
+    `)
+    .eq("transaction_type","TRANSFER")
+    .order("transaction_date",{ascending:false})
+    .order("created_at",{ascending:false})
+    .limit(150);
+
+  if(error) throw error;
+
+  transferRowsCache=data||[];
+
+  // Resolve institution names from account institution_id
+  const instMap=new Map(transferInstitutions.map(i=>[i.id,i.name]));
+  transferRowsCache.forEach(r=>{
+    r._sourceInstitutionName=instMap.get(r.source_account?.institution_id)||r.institutions?.name||"-";
+    r._destinationInstitutionName=instMap.get(r.destination_account?.institution_id)||"-";
+  });
+
+  updateTransferModuleStats();
+  renderTransferRows();
+}
+
+function updateTransferModuleStats(){
+  const r=monthRange();
+  const approvedMonth=transferRowsCache
+    .filter(x=>x.status==="APPROVED" && x.transaction_date>=r.start && x.transaction_date<r.next)
+    .reduce((s,x)=>s+Number(x.amount||0),0);
+
+  $("transferModuleApproved").textContent=rupiah(approvedMonth);
+  $("transferDraftCount").textContent=transferRowsCache.filter(x=>x.status==="DRAFT").length;
+  $("transferSubmittedCount").textContent=transferRowsCache.filter(x=>x.status==="SUBMITTED").length;
+}
+
+function renderTransferRows(){
+  const term=($("transferSearch").value||"").trim().toLowerCase();
+  const status=$("transferStatusFilter").value;
+
+  const rows=transferRowsCache.filter(x=>{
+    const hay=[
+      x.transaction_number,x.description,x._sourceInstitutionName,x._destinationInstitutionName,
+      x.source_account?.account_name,x.destination_account?.account_name
+    ].filter(Boolean).join(" ").toLowerCase();
+    return (!term || hay.includes(term)) && (status==="ALL" || x.status===status);
+  });
+
+  $("transferTransactionsBody").innerHTML=rows.length?rows.map(row=>{
+    const actions=[];
+    if(row.status==="DRAFT" && isCentralUser()){
+      actions.push(`<button class="table-action primary" data-transfer-action="submit" data-id="${row.id}">Ajukan</button>`);
+    }
+    if(row.status==="SUBMITTED" && isCentralUser()){
+      actions.push(`<button class="table-action approve" data-transfer-action="approve" data-id="${row.id}">Setujui</button>`);
+      actions.push(`<button class="table-action reject" data-transfer-action="reject" data-id="${row.id}">Tolak</button>`);
+    }
+
+    return `
+      <tr>
+        <td>${formatDate(row.transaction_date)}</td>
+        <td><strong>${escapeHtml(row.transaction_number||"-")}</strong><span class="account-sub description-cell" title="${escapeHtml(row.description||"")}">${escapeHtml(row.description||"")}</span></td>
+        <td>
+          <div class="route-node">
+            <strong>${escapeHtml(row._sourceInstitutionName)}</strong>
+            <small>${escapeHtml(row.source_account?.account_name||"-")}</small>
+          </div>
+        </td>
+        <td>
+          <div class="route-node">
+            <strong>${escapeHtml(row._destinationInstitutionName)}</strong>
+            <small>${escapeHtml(row.destination_account?.account_name||"-")}</small>
+          </div>
+        </td>
+        <td><strong>${rupiah(row.amount)}</strong></td>
+        <td><span class="pill ${statusClass(row.status)}">${escapeHtml(row.status)}</span></td>
+        <td><div class="action-group">${actions.join("") || `<span class="account-sub">—</span>`}</div></td>
+      </tr>`;
+  }).join(""):`<tr><td colspan="7" class="empty">Belum ada transfer internal sesuai filter.</td></tr>`;
+}
+
+function resetTransferForm(){
+  $("transferForm").reset();
+  $("transferDate").value=todayISO();
+  $("transferAmountPreview").textContent="Rp0";
+  fillTransferMasterOptions();
+}
+
+async function saveTransfer(action){
+  if(!isCentralUser()) throw new Error("Hanya Yayasan yang dapat membuat transfer internal.");
+  if(!currentSession?.user?.id) throw new Error("Sesi login tidak ditemukan.");
+
+  const transaction_date=$("transferDate").value;
+  const sourceInstitutionId=$("transferSourceInstitution").value;
+  const source_account_id=$("transferSourceAccount").value;
+  const destinationInstitutionId=$("transferDestinationInstitution").value;
+  const destination_account_id=$("transferDestinationAccount").value;
+  const amount=Number($("transferAmount").value);
+  const description=($("transferDescription").value||"").trim();
+
+  if(!transaction_date||!sourceInstitutionId||!source_account_id||!destinationInstitutionId||!destination_account_id||!amount||amount<=0){
+    throw new Error("Lengkapi tanggal, sumber, tujuan, dan nominal transfer.");
+  }
+  if(source_account_id===destination_account_id){
+    throw new Error("Akun sumber dan tujuan tidak boleh sama.");
+  }
+
+  const sourceAccount=transferAccounts.find(a=>a.id===source_account_id);
+  const destAccount=transferAccounts.find(a=>a.id===destination_account_id);
+  if(!sourceAccount || sourceAccount.institution_id!==sourceInstitutionId){
+    throw new Error("Akun sumber tidak sesuai dengan lembaga sumber.");
+  }
+  if(!destAccount || destAccount.institution_id!==destinationInstitutionId){
+    throw new Error("Akun tujuan tidak sesuai dengan lembaga tujuan.");
+  }
+
+  const balanceRow=transferBalances.find(b=>b.account_id===source_account_id);
+  const sourceBalance=Number(balanceRow?.current_balance||0);
+
+  if(action==="submit" && amount>sourceBalance){
+    throw new Error(`Saldo akun sumber tidak cukup. Saldo tersedia ${rupiah(sourceBalance)}.`);
+  }
+
+  const payload={
+    transaction_type:"TRANSFER",
+    transaction_date,
+    institution_id:sourceInstitutionId,
+    fund_source_id:null,
+    expense_category_id:null,
+    source_account_id,
+    destination_account_id,
+    amount,
+    description:description||null,
+    status:"DRAFT",
+    created_by:currentSession.user.id
+  };
+
+  const {data,error}=await sb.from("transactions").insert(payload).select("id,transaction_number").single();
+  if(error) throw error;
+
+  if(action==="submit"){
+    const {error:submitError}=await sb.rpc("submit_transaction",{p_transaction_id:data.id});
+    if(submitError) throw submitError;
+  }
+
+  resetTransferForm();
+  await Promise.all([loadTransferModule(),loadDashboard()]);
+  toast(action==="submit" ? `Transfer ${data.transaction_number} berhasil diajukan.` : `Transfer ${data.transaction_number} disimpan sebagai Draft.`);
+}
+
+async function submitExistingTransfer(id){
+  const row=transferRowsCache.find(x=>x.id===id);
+  if(!row) throw new Error("Transfer tidak ditemukan.");
+
+  const balanceRes=await sb.from("v_account_balances")
+    .select("current_balance")
+    .eq("account_id",row.source_account_id)
+    .single();
+  if(balanceRes.error) throw balanceRes.error;
+
+  const balance=Number(balanceRes.data?.current_balance||0);
+  if(Number(row.amount)>balance){
+    throw new Error(`Saldo akun sumber tidak cukup. Saldo tersedia ${rupiah(balance)}.`);
+  }
+
+  const {error}=await sb.rpc("submit_transaction",{p_transaction_id:id});
+  if(error) throw error;
+  await Promise.all([loadTransferModule(),loadDashboard()]);
+  toast("Transfer berhasil diajukan untuk approval.");
+}
+
+async function approveTransfer(id){
+  const row=transferRowsCache.find(x=>x.id===id);
+  if(!row) throw new Error("Transfer tidak ditemukan.");
+
+  const balanceRes=await sb.from("v_account_balances")
+    .select("current_balance")
+    .eq("account_id",row.source_account_id)
+    .single();
+  if(balanceRes.error) throw balanceRes.error;
+
+  const balance=Number(balanceRes.data?.current_balance||0);
+  if(Number(row.amount)>balance){
+    throw new Error(`Transfer tidak dapat disetujui. Saldo sumber hanya ${rupiah(balance)}.`);
+  }
+
+  if(!confirm("Setujui transfer internal ini? Saldo sumber akan berkurang dan saldo tujuan bertambah.")) return;
+
+  const {error}=await sb.rpc("approve_transaction",{p_transaction_id:id,p_note:"Transfer internal disetujui melalui SIMKEU"});
+  if(error) throw error;
+
+  await Promise.all([loadTransferModule(),loadDashboard()]);
+  toast("Transfer disetujui. Saldo kedua akun telah diperbarui.");
+}
+
+async function rejectTransfer(id){
+  const note=prompt("Masukkan alasan penolakan transfer:");
+  if(note===null) return;
+  if(!note.trim()){toast("Alasan penolakan wajib diisi.");return}
+
+  const {error}=await sb.rpc("reject_transaction",{p_transaction_id:id,p_note:note.trim()});
+  if(error) throw error;
+
+  await Promise.all([loadTransferModule(),loadDashboard()]);
+  toast("Transfer internal ditolak.");
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -775,8 +1116,10 @@ $("logoutBtn").addEventListener("click",async()=>{
 $("refreshBtn").addEventListener("click",async()=>{
   const incomeVisible=!$("incomeSection").classList.contains("hidden");
   const expenseVisible=!$("expenseSection").classList.contains("hidden");
+  const transferVisible=!$("transferSection").classList.contains("hidden");
   if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
   else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
+  else if(transferVisible) await Promise.all([loadDashboard(),loadTransferModule()]);
   else await loadDashboard();
   toast("Data diperbarui.");
 });
@@ -801,12 +1144,15 @@ async function switchView(v){
   $("dashboardSection").classList.toggle("hidden",v!=="dashboard");
   $("incomeSection").classList.toggle("hidden",v!=="pemasukan");
   $("expenseSection").classList.toggle("hidden",v!=="pengeluaran");
-  $("placeholderSection").classList.toggle("hidden",v==="dashboard"||v==="pemasukan"||v==="pengeluaran");
+  $("transferSection").classList.toggle("hidden",v!=="transfer");
+  $("placeholderSection").classList.toggle("hidden",v==="dashboard"||v==="pemasukan"||v==="pengeluaran"||v==="transfer");
 
   if(v==="pemasukan"){
     await loadIncomeModule();
   }else if(v==="pengeluaran"){
     await loadExpenseModule();
+  }else if(v==="transfer"){
+    await loadTransferModule();
   }else if(v!=="dashboard"){
     $("placeholderTitle").textContent=meta[v][0];
   }
@@ -873,6 +1219,63 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
   }
 });
 
+
+
+/* Transfer events */
+$("transferSourceInstitution").addEventListener("change",refreshTransferSourceAccounts);
+$("transferDestinationInstitution").addEventListener("change",refreshTransferDestinationAccounts);
+$("transferSourceAccount").addEventListener("change",()=>{
+  updateTransferBalanceHint();
+  refreshTransferDestinationAccounts();
+});
+$("transferDestinationAccount").addEventListener("change",validateDifferentTransferAccounts);
+$("transferAmount").addEventListener("input",()=>{
+  $("transferAmountPreview").textContent=rupiah(Number($("transferAmount").value||0));
+  updateTransferBalanceHint();
+});
+$("transferSearch").addEventListener("input",renderTransferRows);
+$("transferStatusFilter").addEventListener("change",renderTransferRows);
+$("refreshTransferBtn").addEventListener("click",async()=>{
+  await loadTransferModule(); toast("Riwayat transfer diperbarui.");
+});
+$("newTransferBtn").addEventListener("click",()=>{
+  $("transferFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+  setTimeout(()=>$("transferDate").focus(),300);
+});
+$("saveTransferDraftBtn").addEventListener("click",()=>{pendingTransferSaveAction="draft"});
+$("saveTransferSubmitBtn").addEventListener("click",()=>{pendingTransferSaveAction="submit"});
+
+$("transferForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const buttons=[$("saveTransferDraftBtn"),$("saveTransferSubmitBtn")];
+  buttons.forEach(b=>b.disabled=true);
+  try{
+    await saveTransfer(pendingTransferSaveAction);
+  }catch(err){
+    console.error(err);
+    toast("Gagal menyimpan transfer: "+(err.message||"error"));
+  }finally{
+    buttons.forEach(b=>b.disabled=false);
+  }
+});
+
+$("transferTransactionsBody").addEventListener("click",async e=>{
+  const btn=e.target.closest("[data-transfer-action]");
+  if(!btn)return;
+  btn.disabled=true;
+  try{
+    const id=btn.dataset.id;
+    const action=btn.dataset.transferAction;
+    if(action==="submit") await submitExistingTransfer(id);
+    if(action==="approve") await approveTransfer(id);
+    if(action==="reject") await rejectTransfer(id);
+  }catch(err){
+    console.error(err);
+    toast("Aksi transfer gagal: "+(err.message||"error"));
+  }finally{
+    btn.disabled=false;
+  }
+});
 
 /* Expense events */
 $("expenseInstitution").addEventListener("change",refreshExpenseAccountOptions);

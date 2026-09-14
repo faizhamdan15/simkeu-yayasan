@@ -469,6 +469,164 @@
           </div>
         </div>
 
+
+        <div id="transferSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">PERPINDAHAN DANA INTERNAL</span>
+              <h1>Transfer Internal</h1>
+              <p>Pindahkan dana antar kas/rekening Yayasan dan lembaga tanpa dihitung sebagai pemasukan baru konsolidasi.</p>
+            </div>
+            <button id="newTransferBtn" class="brand-btn" type="button">+ Transfer Dana</button>
+          </div>
+
+          <div class="transfer-info">
+            <div>
+              <strong>Kenapa memakai Transfer Internal?</strong>
+              <span>Contoh: Yayasan mengirim Rp10 juta ke MTs. Saldo Yayasan berkurang dan saldo MTs bertambah, tetapi total kekayaan konsolidasi tidak berubah.</span>
+            </div>
+          </div>
+
+          <div class="module-stats">
+            <article class="mini-stat">
+              <span>Transfer Bulan Ini</span>
+              <strong id="transferModuleApproved">Rp0</strong>
+              <small>Total transfer APPROVED</small>
+            </article>
+            <article class="mini-stat">
+              <span>Draft</span>
+              <strong id="transferDraftCount">0</strong>
+              <small>Belum diajukan</small>
+            </article>
+            <article class="mini-stat">
+              <span>Menunggu Approval</span>
+              <strong id="transferSubmittedCount">0</strong>
+              <small>Status SUBMITTED</small>
+            </article>
+          </div>
+
+          <div class="income-layout">
+            <article id="transferFormCard" class="panel form-panel">
+              <div class="panel-title">
+                <h3>Form Transfer Internal</h3>
+                <p>Pilih akun sumber dan akun tujuan.</p>
+              </div>
+
+              <form id="transferForm" class="finance-form">
+                <div class="form-grid">
+                  <label class="form-field full">
+                    <span>Tanggal Transfer</span>
+                    <input id="transferDate" type="date" required>
+                  </label>
+
+                  <div class="transfer-side full">
+                    <div class="transfer-side-title source-title">DARI</div>
+
+                    <label class="form-field">
+                      <span>Lembaga Sumber</span>
+                      <select id="transferSourceInstitution" required>
+                        <option value="">Pilih lembaga sumber</option>
+                      </select>
+                    </label>
+
+                    <label class="form-field">
+                      <span>Akun Sumber</span>
+                      <select id="transferSourceAccount" required disabled>
+                        <option value="">Pilih kas/bank sumber</option>
+                      </select>
+                    </label>
+
+                    <div id="transferSourceBalance" class="balance-hint">Saldo tersedia: —</div>
+                  </div>
+
+                  <div class="transfer-arrow full">↓</div>
+
+                  <div class="transfer-side full destination-side">
+                    <div class="transfer-side-title dest-title">KE</div>
+
+                    <label class="form-field">
+                      <span>Lembaga Tujuan</span>
+                      <select id="transferDestinationInstitution" required>
+                        <option value="">Pilih lembaga tujuan</option>
+                      </select>
+                    </label>
+
+                    <label class="form-field">
+                      <span>Akun Tujuan</span>
+                      <select id="transferDestinationAccount" required disabled>
+                        <option value="">Pilih kas/bank tujuan</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label class="form-field full">
+                    <span>Nominal Transfer</span>
+                    <div class="money-input">
+                      <b>Rp</b>
+                      <input id="transferAmount" type="number" min="1" step="1" placeholder="Contoh: 10000000" required>
+                    </div>
+                    <small id="transferAmountPreview">Rp0</small>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Keterangan</span>
+                    <textarea id="transferDescription" rows="3" placeholder="Contoh: Pencairan kebutuhan operasional MTs September 2026"></textarea>
+                  </label>
+                </div>
+
+                <div class="form-note">
+                  <strong>Catatan:</strong> transfer tidak dicatat sebagai pendapatan/pengeluaran eksternal. Hanya saldo akun sumber dan tujuan yang berubah setelah transaksi APPROVED.
+                </div>
+
+                <div class="form-actions">
+                  <button id="saveTransferDraftBtn" class="secondary-btn" type="submit" data-action="draft">Simpan Draft</button>
+                  <button id="saveTransferSubmitBtn" class="brand-btn" type="submit" data-action="submit">Simpan & Ajukan</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel income-list-panel">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Riwayat Transfer Internal</h3>
+                  <p>Perpindahan dana antar akun internal Yayasan dan lembaga.</p>
+                </div>
+                <button id="refreshTransferBtn" class="outline-btn small-action" type="button">↻ Refresh</button>
+              </div>
+
+              <div class="income-filters">
+                <input id="transferSearch" type="search" placeholder="Cari nomor/keterangan/lembaga...">
+                <select id="transferStatusFilter">
+                  <option value="ALL">Semua Status</option>
+                  <option value="DRAFT">DRAFT</option>
+                  <option value="SUBMITTED">SUBMITTED</option>
+                  <option value="APPROVED">APPROVED</option>
+                  <option value="REJECTED">REJECTED</option>
+                </select>
+              </div>
+
+              <div class="table-wrap">
+                <table class="income-table">
+                  <thead>
+                    <tr>
+                      <th>Tanggal</th>
+                      <th>No. Transfer</th>
+                      <th>Dari</th>
+                      <th>Ke</th>
+                      <th>Nominal</th>
+                      <th>Status</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="transferTransactionsBody">
+                    <tr><td colspan="7" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </div>
+
         <div id="placeholderSection" class="placeholder hidden">
           <div class="placeholder-card">
             <div class="big-icon">⚙</div>

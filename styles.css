@@ -446,3 +446,52 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
 }
 .proof-btn:hover{background:#FFE9CB}
 .proof-missing{font-size:9px;color:#A39B93}
+
+
+/* =========================================================
+   MODUL TRANSFER INTERNAL
+   ========================================================= */
+.transfer-info{
+  margin-bottom:14px;border:1px solid #F0D2A8;background:#FFF8EF;border-radius:14px;
+  padding:12px 14px;color:#6F563D
+}
+.transfer-info div{display:flex;flex-direction:column;gap:3px}
+.transfer-info strong{font-size:11px;color:#8E4B19}
+.transfer-info span{font-size:10px;line-height:1.5}
+.transfer-side{
+  position:relative;border:1px solid #E7E0D8;border-radius:13px;padding:13px;
+  display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#FBFAF8
+}
+.destination-side{background:#FFF9F1;border-color:#EED7B7}
+.transfer-side-title{
+  grid-column:1/-1;font-size:9px;font-weight:950;letter-spacing:.14em;
+  color:#8A8179;margin-bottom:-2px
+}
+.source-title{color:#594F46}
+.dest-title{color:var(--brand-dark)}
+.transfer-arrow{
+  height:28px;display:grid;place-items:center;font-size:18px;color:var(--brand);
+  font-weight:900
+}
+.balance-hint{
+  grid-column:1/-1;background:#fff;border:1px solid #ECE6DF;border-radius:9px;
+  padding:8px 10px;font-size:10px;color:#696057;font-weight:750
+}
+.balance-hint.insufficient{
+  background:#FFF2F0;border-color:#F4C3BD;color:#A93427
+}
+.transfer-route{
+  display:flex;align-items:center;gap:7px;min-width:190px
+}
+.route-node{display:flex;flex-direction:column;min-width:0}
+.route-node strong{font-size:10px;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.route-node small{font-size:8px;color:#948B83;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.route-arrow{color:var(--brand);font-weight:900}
+.central-only-note{
+  border:1px solid #F0D2A8;background:#FFF8EF;color:#7D6043;border-radius:11px;
+  padding:10px 11px;font-size:10px;line-height:1.45;margin-bottom:12px
+}
+@media(max-width:720px){
+  .transfer-side{grid-template-columns:1fr}
+  .transfer-side-title,.balance-hint{grid-column:auto}
+}
