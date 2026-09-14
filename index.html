@@ -190,6 +190,139 @@
           </div>
         </div>
 
+
+        <div id="incomeSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">MODUL KEUANGAN MASUK</span>
+              <h1>Pemasukan</h1>
+              <p>Catat dana BOS, BOPP, bantuan, hibah, donasi, dan sumber pemasukan lainnya.</p>
+            </div>
+            <button id="newIncomeBtn" class="brand-btn" type="button">+ Tambah Pemasukan</button>
+          </div>
+
+          <div class="module-stats">
+            <article class="mini-stat">
+              <span>Pemasukan Bulan Ini</span>
+              <strong id="incomeModuleApproved">Rp0</strong>
+              <small>Transaksi APPROVED</small>
+            </article>
+            <article class="mini-stat">
+              <span>Draft</span>
+              <strong id="incomeDraftCount">0</strong>
+              <small>Belum diajukan</small>
+            </article>
+            <article class="mini-stat">
+              <span>Menunggu Approval</span>
+              <strong id="incomeSubmittedCount">0</strong>
+              <small>Status SUBMITTED</small>
+            </article>
+          </div>
+
+          <div class="income-layout">
+            <article id="incomeFormCard" class="panel form-panel">
+              <div class="panel-title">
+                <h3>Input Pemasukan</h3>
+                <p>Lengkapi informasi dana yang diterima.</p>
+              </div>
+
+              <form id="incomeForm" class="finance-form">
+                <div class="form-grid">
+                  <label class="form-field">
+                    <span>Tanggal Transaksi</span>
+                    <input id="incomeDate" type="date" required>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Lembaga</span>
+                    <select id="incomeInstitution" required>
+                      <option value="">Pilih lembaga</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Sumber Dana</span>
+                    <select id="incomeFundSource" required>
+                      <option value="">Pilih sumber dana</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Akun Tujuan</span>
+                    <select id="incomeDestinationAccount" required disabled>
+                      <option value="">Pilih akun kas/bank</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Nominal</span>
+                    <div class="money-input">
+                      <b>Rp</b>
+                      <input id="incomeAmount" type="number" min="1" step="1" placeholder="Contoh: 50000000" required>
+                    </div>
+                    <small id="incomeAmountPreview">Rp0</small>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Keterangan</span>
+                    <textarea id="incomeDescription" rows="3" placeholder="Contoh: Pencairan dana BOS tahap II Tahun 2026"></textarea>
+                  </label>
+                </div>
+
+                <div class="form-note">
+                  <strong>Catatan:</strong> transaksi yang disimpan sebagai Draft belum memengaruhi saldo. Saldo berubah setelah transaksi berstatus <b>APPROVED</b>.
+                </div>
+
+                <div class="form-actions">
+                  <button id="saveIncomeDraftBtn" class="secondary-btn" type="submit" data-action="draft">Simpan Draft</button>
+                  <button id="saveIncomeSubmitBtn" class="brand-btn" type="submit" data-action="submit">Simpan & Ajukan</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel income-list-panel">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Riwayat Pemasukan</h3>
+                  <p>Transaksi terbaru yang dapat Anda akses.</p>
+                </div>
+                <button id="refreshIncomeBtn" class="outline-btn small-action" type="button">↻ Refresh</button>
+              </div>
+
+              <div class="income-filters">
+                <input id="incomeSearch" type="search" placeholder="Cari nomor/keterangan...">
+                <select id="incomeStatusFilter">
+                  <option value="ALL">Semua Status</option>
+                  <option value="DRAFT">DRAFT</option>
+                  <option value="SUBMITTED">SUBMITTED</option>
+                  <option value="APPROVED">APPROVED</option>
+                  <option value="REJECTED">REJECTED</option>
+                </select>
+              </div>
+
+              <div class="table-wrap">
+                <table class="income-table">
+                  <thead>
+                    <tr>
+                      <th>Tanggal</th>
+                      <th>No. Transaksi</th>
+                      <th>Lembaga</th>
+                      <th>Sumber</th>
+                      <th>Akun Tujuan</th>
+                      <th>Nominal</th>
+                      <th>Status</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="incomeTransactionsBody">
+                    <tr><td colspan="8" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </div>
+
         <div id="placeholderSection" class="placeholder hidden">
           <div class="placeholder-card">
             <div class="big-icon">⚙</div>

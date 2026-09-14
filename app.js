@@ -6,6 +6,14 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 const $ = id => document.getElementById(id);
 let cashflowChart = null;
 let expenseChart = null;
+let currentProfile = null;
+let currentSession = null;
+
+let incomeInstitutions = [];
+let incomeAccounts = [];
+let incomeFundSources = [];
+let incomeRowsCache = [];
+let pendingIncomeSaveAction = "draft";
 
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
@@ -25,15 +33,18 @@ const escapeHtml = s => String(s??"")
 
 function toast(msg){
   const t=$("toast"); t.textContent=msg; t.classList.add("show");
-  clearTimeout(window.__toast); window.__toast=setTimeout(()=>t.classList.remove("show"),2500);
+  clearTimeout(window.__toast); window.__toast=setTimeout(()=>t.classList.remove("show"),2800);
 }
+
 function roleLabel(r){
   return {SUPER_ADMIN:"Super Admin Yayasan",FOUNDATION_TREASURER:"Bendahara Yayasan",
     INSTITUTION_ADMIN:"Admin/Bendahara Lembaga",VIEWER:"Viewer"}[r]||r||"-";
 }
 function typeLabel(t){return {INCOME:"Pemasukan",EXPENSE:"Pengeluaran",TRANSFER:"Transfer"}[t]||t}
 function typeClass(t){return {INCOME:"income",EXPENSE:"expense",TRANSFER:"transfer"}[t]||""}
-function statusClass(s){return {APPROVED:"approved",SUBMITTED:"submitted",DRAFT:"draft",REJECTED:"rejected"}[s]||"draft"}
+function statusClass(s){
+  return {APPROVED:"approved",SUBMITTED:"submitted",DRAFT:"draft",REJECTED:"rejected",VOID:"draft"}[s]||"draft"
+}
 function formatDate(v){
   if(!v)return "-";
   return new Intl.DateTimeFormat("id-ID",{day:"2-digit",month:"short",year:"numeric"}).format(new Date(v+"T00:00:00"));
@@ -43,6 +54,14 @@ function monthRange(){
   const start=new Date(y,m,1).toISOString().slice(0,10);
   const next=new Date(y,m+1,1).toISOString().slice(0,10);
   return {start,next};
+}
+function isCentralUser(){
+  return ["SUPER_ADMIN","FOUNDATION_TREASURER"].includes(currentProfile?.role);
+}
+function todayISO(){
+  const d=new Date();
+  const tz=d.getTimezoneOffset();
+  return new Date(d.getTime()-tz*60000).toISOString().slice(0,10);
 }
 
 async function getProfile(uid){
@@ -55,23 +74,29 @@ async function getProfile(uid){
 
 async function enterApp(session){
   try{
-    const p=await getProfile(session.user.id);
+    currentSession=session;
+    currentProfile=await getProfile(session.user.id);
+    const p=currentProfile;
+
     $("loginView").classList.add("hidden");
     $("appView").classList.remove("hidden");
+
     const first=(p.full_name||"Pengguna").trim().split(/\s+/)[0];
     $("userName").textContent=p.full_name||"Pengguna";
     $("userRole").textContent=roleLabel(p.role);
     $("avatar").textContent=first.charAt(0).toUpperCase();
     $("welcomeName").textContent=first;
     $("welcomeInstitution").textContent=
-      ["SUPER_ADMIN","FOUNDATION_TREASURER"].includes(p.role)
+      isCentralUser()
       ? "Dashboard konsolidasi Yayasan dan seluruh lembaga"
       : "Lembaga: "+(p.institutions?.name||"-");
     $("today").textContent=new Intl.DateTimeFormat("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(new Date());
+
     await loadDashboard();
   }catch(err){
     console.error(err);
     await sb.auth.signOut();
+    currentProfile=null; currentSession=null;
     $("appView").classList.add("hidden");
     $("loginView").classList.remove("hidden");
     $("loginError").textContent="Login berhasil, tetapi profil SIMKEU tidak ditemukan. Periksa tabel profiles.";
@@ -103,7 +128,6 @@ async function loadDashboard(){
     renderRecent(recent.data||[]);
     renderCashflow(yearly.data||[]);
     renderExpense(m);
-    toast("Dashboard diperbarui");
   }catch(err){
     console.error(err);
     toast("Gagal memuat dashboard: "+(err.message||"error"));
@@ -152,11 +176,11 @@ function renderCashflow(rows){
     type:"line",
     data:{labels:["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"],
       datasets:[
-        {label:"Pemasukan",data:inc,borderColor:"#059669",backgroundColor:"rgba(5,150,105,.08)",fill:true,tension:.35,borderWidth:2,pointRadius:2},
-        {label:"Pengeluaran",data:exp,borderColor:"#e58a2b",backgroundColor:"rgba(229,138,43,.03)",fill:false,tension:.35,borderWidth:2,pointRadius:2}
+        {label:"Pemasukan",data:inc,borderColor:"#F89921",backgroundColor:"rgba(248,153,33,.10)",fill:true,tension:.35,borderWidth:2,pointRadius:2},
+        {label:"Pengeluaran",data:exp,borderColor:"#8C3F20",backgroundColor:"rgba(140,63,32,.03)",fill:false,tension:.35,borderWidth:2,pointRadius:2}
       ]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"top",align:"end"},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${rupiah(c.raw)}`}}},
-      scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{callback:v=>shortMoney(v)},grid:{color:"#eef2f0"}}}}
+      scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{callback:v=>shortMoney(v)},grid:{color:"#F0ECE7"}}}}
   });
 }
 
@@ -172,10 +196,237 @@ function renderExpense(rows){
   if(expenseChart)expenseChart.destroy();
   expenseChart=new Chart($("expenseChart"),{
     type:"doughnut",
-    data:{labels,datasets:[{data,backgroundColor:empty?["#e7ece9"]:["#059669","#10b981","#d6a84b","#3b82f6","#8b5cf6","#f59e0b","#ef4444","#14b8a6","#6366f1"],borderWidth:0}]},
+    data:{labels,datasets:[{data,backgroundColor:empty?["#E7E3DE"]:["#F89921","#CD6828","#2D2A27","#E9B44C","#8C3F20","#F2C078","#6B5A49","#C97A40","#A69A8B"],borderWidth:0}]},
     options:{responsive:true,maintainAspectRatio:false,cutout:"67%",plugins:{legend:{position:"bottom",labels:{usePointStyle:true,boxWidth:8,font:{size:10}}},tooltip:{callbacks:{label:c=>empty?"Belum ada data":`${c.label}: ${rupiah(c.raw)}`}}}}
   });
 }
+
+/* =========================================================
+   MODUL PEMASUKAN
+   ========================================================= */
+
+async function loadIncomeModule(){
+  try{
+    $("incomeTransactionsBody").innerHTML=`<tr><td colspan="8" class="empty">Memuat...</td></tr>`;
+
+    const [instRes, accountRes, fundRes] = await Promise.all([
+      sb.from("institutions").select("id,code,name,institution_type").eq("is_active",true).order("name"),
+      sb.from("accounts").select("id,institution_id,account_name,account_type,bank_name,is_active").eq("is_active",true).order("account_name"),
+      sb.from("fund_sources").select("id,code,name,is_active").eq("is_active",true).order("name")
+    ]);
+    [instRes,accountRes,fundRes].forEach(r=>{if(r.error)throw r.error});
+
+    incomeInstitutions=instRes.data||[];
+    incomeAccounts=accountRes.data||[];
+    incomeFundSources=fundRes.data||[];
+
+    fillIncomeMasterOptions();
+    if(!$("incomeDate").value) $("incomeDate").value=todayISO();
+
+    await loadIncomeTransactions();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat modul pemasukan: "+(err.message||"error"));
+  }
+}
+
+function fillIncomeMasterOptions(){
+  const instSelect=$("incomeInstitution");
+  const fundSelect=$("incomeFundSource");
+
+  instSelect.innerHTML=`<option value="">Pilih lembaga</option>`+
+    incomeInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+
+  fundSelect.innerHTML=`<option value="">Pilih sumber dana</option>`+
+    incomeFundSources.map(f=>`<option value="${f.id}">${escapeHtml(f.name)}</option>`).join("");
+
+  if(!isCentralUser() && currentProfile?.institution_id){
+    instSelect.value=currentProfile.institution_id;
+    instSelect.disabled=true;
+    refreshIncomeAccountOptions();
+  }else{
+    instSelect.disabled=false;
+  }
+}
+
+function refreshIncomeAccountOptions(){
+  const institutionId=$("incomeInstitution").value;
+  const accountSelect=$("incomeDestinationAccount");
+  const rows=incomeAccounts.filter(a=>a.institution_id===institutionId);
+
+  accountSelect.innerHTML=`<option value="">Pilih akun kas/bank</option>`+
+    rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
+
+  accountSelect.disabled=!institutionId || !rows.length;
+}
+
+async function loadIncomeTransactions(){
+  const {data,error}=await sb.from("transactions")
+    .select(`
+      id,
+      transaction_number,
+      transaction_date,
+      amount,
+      description,
+      status,
+      created_at,
+      institution_id,
+      destination_account_id,
+      fund_source_id,
+      institutions:institution_id(name),
+      fund_sources:fund_source_id(name),
+      accounts:destination_account_id(account_name,account_type,bank_name)
+    `)
+    .eq("transaction_type","INCOME")
+    .order("transaction_date",{ascending:false})
+    .order("created_at",{ascending:false})
+    .limit(150);
+
+  if(error) throw error;
+  incomeRowsCache=data||[];
+  updateIncomeModuleStats();
+  renderIncomeRows();
+}
+
+function updateIncomeModuleStats(){
+  const r=monthRange();
+  const approvedMonth=incomeRowsCache
+    .filter(x=>x.status==="APPROVED" && x.transaction_date>=r.start && x.transaction_date<r.next)
+    .reduce((s,x)=>s+Number(x.amount||0),0);
+
+  $("incomeModuleApproved").textContent=rupiah(approvedMonth);
+  $("incomeDraftCount").textContent=incomeRowsCache.filter(x=>x.status==="DRAFT").length;
+  $("incomeSubmittedCount").textContent=incomeRowsCache.filter(x=>x.status==="SUBMITTED").length;
+}
+
+function renderIncomeRows(){
+  const term=($("incomeSearch").value||"").trim().toLowerCase();
+  const status=$("incomeStatusFilter").value;
+
+  const rows=incomeRowsCache.filter(x=>{
+    const hay=[
+      x.transaction_number,
+      x.description,
+      x.institutions?.name,
+      x.fund_sources?.name,
+      x.accounts?.account_name
+    ].filter(Boolean).join(" ").toLowerCase();
+    return (!term || hay.includes(term)) && (status==="ALL" || x.status===status);
+  });
+
+  $("incomeTransactionsBody").innerHTML=rows.length?rows.map(row=>{
+    const actions=[];
+    if(row.status==="DRAFT"){
+      actions.push(`<button class="table-action primary" data-income-action="submit" data-id="${row.id}">Ajukan</button>`);
+    }
+    if(row.status==="SUBMITTED" && isCentralUser()){
+      actions.push(`<button class="table-action approve" data-income-action="approve" data-id="${row.id}">Setujui</button>`);
+      actions.push(`<button class="table-action reject" data-income-action="reject" data-id="${row.id}">Tolak</button>`);
+    }
+
+    return `
+      <tr>
+        <td>${formatDate(row.transaction_date)}</td>
+        <td><strong>${escapeHtml(row.transaction_number||"-")}</strong><span class="account-sub description-cell" title="${escapeHtml(row.description||"")}">${escapeHtml(row.description||"")}</span></td>
+        <td>${escapeHtml(row.institutions?.name||"-")}</td>
+        <td>${escapeHtml(row.fund_sources?.name||"-")}</td>
+        <td>${escapeHtml(row.accounts?.account_name||"-")}</td>
+        <td><strong>${rupiah(row.amount)}</strong></td>
+        <td><span class="pill ${statusClass(row.status)}">${escapeHtml(row.status)}</span></td>
+        <td><div class="action-group">${actions.join("") || `<span class="account-sub">—</span>`}</div></td>
+      </tr>`;
+  }).join(""):`<tr><td colspan="8" class="empty">Belum ada data pemasukan sesuai filter.</td></tr>`;
+}
+
+function resetIncomeForm(){
+  $("incomeForm").reset();
+  $("incomeDate").value=todayISO();
+  $("incomeAmountPreview").textContent="Rp0";
+  if(!isCentralUser() && currentProfile?.institution_id){
+    $("incomeInstitution").value=currentProfile.institution_id;
+    $("incomeInstitution").disabled=true;
+    refreshIncomeAccountOptions();
+  }else{
+    $("incomeInstitution").disabled=false;
+    $("incomeDestinationAccount").innerHTML=`<option value="">Pilih akun kas/bank</option>`;
+    $("incomeDestinationAccount").disabled=true;
+  }
+}
+
+async function saveIncome(action){
+  if(!currentSession?.user?.id) throw new Error("Sesi login tidak ditemukan.");
+
+  const institution_id=$("incomeInstitution").value;
+  const fund_source_id=$("incomeFundSource").value;
+  const destination_account_id=$("incomeDestinationAccount").value;
+  const transaction_date=$("incomeDate").value;
+  const amount=Number($("incomeAmount").value);
+  const description=($("incomeDescription").value||"").trim();
+
+  if(!transaction_date||!institution_id||!fund_source_id||!destination_account_id||!amount||amount<=0){
+    throw new Error("Lengkapi tanggal, lembaga, sumber dana, akun tujuan, dan nominal.");
+  }
+
+  const selectedAccount=incomeAccounts.find(a=>a.id===destination_account_id);
+  if(!selectedAccount || selectedAccount.institution_id!==institution_id){
+    throw new Error("Akun tujuan tidak sesuai dengan lembaga yang dipilih.");
+  }
+
+  const payload={
+    transaction_type:"INCOME",
+    transaction_date,
+    institution_id,
+    fund_source_id,
+    destination_account_id,
+    source_account_id:null,
+    expense_category_id:null,
+    amount,
+    description:description||null,
+    status:"DRAFT",
+    created_by:currentSession.user.id
+  };
+
+  const {data,error}=await sb.from("transactions").insert(payload).select("id,transaction_number").single();
+  if(error) throw error;
+
+  if(action==="submit"){
+    const {error:submitError}=await sb.rpc("submit_transaction",{p_transaction_id:data.id});
+    if(submitError) throw submitError;
+  }
+
+  resetIncomeForm();
+  await Promise.all([loadIncomeTransactions(),loadDashboard()]);
+  toast(action==="submit" ? `Pemasukan ${data.transaction_number} berhasil diajukan.` : `Pemasukan ${data.transaction_number} disimpan sebagai Draft.`);
+}
+
+async function submitExistingIncome(id){
+  const {error}=await sb.rpc("submit_transaction",{p_transaction_id:id});
+  if(error) throw error;
+  await Promise.all([loadIncomeTransactions(),loadDashboard()]);
+  toast("Transaksi berhasil diajukan untuk approval.");
+}
+
+async function approveIncome(id){
+  if(!confirm("Setujui transaksi pemasukan ini? Setelah APPROVED, transaksi akan memengaruhi saldo.")) return;
+  const {error}=await sb.rpc("approve_transaction",{p_transaction_id:id,p_note:"Disetujui melalui SIMKEU"});
+  if(error) throw error;
+  await Promise.all([loadIncomeTransactions(),loadDashboard()]);
+  toast("Pemasukan disetujui. Saldo sudah diperbarui.");
+}
+
+async function rejectIncome(id){
+  const note=prompt("Masukkan alasan penolakan:");
+  if(note===null) return;
+  if(!note.trim()){toast("Alasan penolakan wajib diisi.");return}
+  const {error}=await sb.rpc("reject_transaction",{p_transaction_id:id,p_note:note.trim()});
+  if(error) throw error;
+  await Promise.all([loadIncomeTransactions(),loadDashboard()]);
+  toast("Transaksi pemasukan ditolak.");
+}
+
+/* =========================================================
+   AUTH + NAV
+   ========================================================= */
 
 $("loginForm").addEventListener("submit",async e=>{
   e.preventDefault(); $("loginError").classList.add("hidden");
@@ -185,38 +436,115 @@ $("loginForm").addEventListener("submit",async e=>{
   if(error){$("loginError").textContent=error.message;$("loginError").classList.remove("hidden");return}
   if(data.session)await enterApp(data.session);
 });
+
 $("togglePassword").addEventListener("click",()=>{
   const p=$("password");p.type=p.type==="password"?"text":"password";
   $("togglePassword").textContent=p.type==="password"?"Lihat":"Sembunyi";
 });
-$("logoutBtn").addEventListener("click",async()=>{await sb.auth.signOut();$("appView").classList.add("hidden");$("loginView").classList.remove("hidden");$("loginForm").reset()});
-$("refreshBtn").addEventListener("click",loadDashboard);
+
+$("logoutBtn").addEventListener("click",async()=>{
+  await sb.auth.signOut();
+  currentProfile=null; currentSession=null;
+  $("appView").classList.add("hidden");
+  $("loginView").classList.remove("hidden");
+  $("loginForm").reset();
+});
+
+$("refreshBtn").addEventListener("click",async()=>{
+  const incomeVisible=!$("incomeSection").classList.contains("hidden");
+  if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
+  else await loadDashboard();
+  toast("Data diperbarui.");
+});
 
 const meta={
- dashboard:["Dashboard","Ringkasan keuangan Yayasan dan lembaga"],
- pemasukan:["Pemasukan","Catatan seluruh dana masuk"],
- pengeluaran:["Pengeluaran","Catatan dan approval pengeluaran"],
- transfer:["Transfer Internal","Perpindahan dana antar lembaga"],
- bukti:["Bukti Transaksi","Dokumentasi nota, kuitansi, dan invoice"],
- lembaga:["Lembaga","Kelola unit di bawah Yayasan"],
- laporan:["Laporan","Rekap keuangan dan ekspor"],
- analitik:["Analitik","Diagram, tren, dan persentase"],
- pengguna:["Pengguna","Kelola akun dan hak akses"]
+  dashboard:["Dashboard","SIMKEU Yayasan Ar-Raudlah Kapedi"],
+  pemasukan:["Pemasukan","Catatan seluruh dana masuk"],
+  pengeluaran:["Pengeluaran","Catatan dan approval pengeluaran"],
+  transfer:["Transfer Internal","Perpindahan dana antar lembaga"],
+  bukti:["Bukti Transaksi","Dokumentasi nota, kuitansi, dan invoice"],
+  lembaga:["Lembaga","Kelola unit di bawah Yayasan"],
+  laporan:["Laporan","Rekap keuangan dan ekspor"],
+  analitik:["Analitik","Diagram, tren, dan persentase"],
+  pengguna:["Pengguna","Kelola akun dan hak akses"]
 };
-function switchView(v){
+
+async function switchView(v){
   document.querySelectorAll(".nav").forEach(b=>b.classList.toggle("active",b.dataset.view===v));
-  $("pageTitle").textContent=meta[v][0];$("pageSubtitle").textContent=meta[v][1];
+  $("pageTitle").textContent=meta[v][0];
+  $("pageSubtitle").textContent=meta[v][1];
+
   $("dashboardSection").classList.toggle("hidden",v!=="dashboard");
-  $("placeholderSection").classList.toggle("hidden",v==="dashboard");
-  if(v!=="dashboard")$("placeholderTitle").textContent=meta[v][0];
+  $("incomeSection").classList.toggle("hidden",v!=="pemasukan");
+  $("placeholderSection").classList.toggle("hidden",v==="dashboard"||v==="pemasukan");
+
+  if(v==="pemasukan"){
+    await loadIncomeModule();
+  }else if(v!=="dashboard"){
+    $("placeholderTitle").textContent=meta[v][0];
+  }
+
   closeSidebar();
 }
+
 document.querySelectorAll(".nav").forEach(b=>b.addEventListener("click",()=>switchView(b.dataset.view)));
 $("backDashboard").addEventListener("click",()=>switchView("dashboard"));
 
 function openSidebar(){$("sidebar").classList.add("open");$("backdrop").classList.remove("hidden")}
 function closeSidebar(){$("sidebar").classList.remove("open");$("backdrop").classList.add("hidden")}
-$("menuBtn").addEventListener("click",openSidebar);$("closeSidebar").addEventListener("click",closeSidebar);$("backdrop").addEventListener("click",closeSidebar);
+$("menuBtn").addEventListener("click",openSidebar);
+$("closeSidebar").addEventListener("click",closeSidebar);
+$("backdrop").addEventListener("click",closeSidebar);
+
+/* Income events */
+$("incomeInstitution").addEventListener("change",refreshIncomeAccountOptions);
+$("incomeAmount").addEventListener("input",()=>{
+  $("incomeAmountPreview").textContent=rupiah(Number($("incomeAmount").value||0));
+});
+$("incomeSearch").addEventListener("input",renderIncomeRows);
+$("incomeStatusFilter").addEventListener("change",renderIncomeRows);
+$("refreshIncomeBtn").addEventListener("click",async()=>{
+  await loadIncomeTransactions(); toast("Riwayat pemasukan diperbarui.");
+});
+$("newIncomeBtn").addEventListener("click",()=>{
+  $("incomeFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+  setTimeout(()=>$("incomeDate").focus(),300);
+});
+
+$("saveIncomeDraftBtn").addEventListener("click",()=>{pendingIncomeSaveAction="draft"});
+$("saveIncomeSubmitBtn").addEventListener("click",()=>{pendingIncomeSaveAction="submit"});
+
+$("incomeForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const buttons=[$("saveIncomeDraftBtn"),$("saveIncomeSubmitBtn")];
+  buttons.forEach(b=>b.disabled=true);
+  try{
+    await saveIncome(pendingIncomeSaveAction);
+  }catch(err){
+    console.error(err);
+    toast("Gagal menyimpan pemasukan: "+(err.message||"error"));
+  }finally{
+    buttons.forEach(b=>b.disabled=false);
+  }
+});
+
+$("incomeTransactionsBody").addEventListener("click",async e=>{
+  const btn=e.target.closest("[data-income-action]");
+  if(!btn)return;
+  btn.disabled=true;
+  try{
+    const id=btn.dataset.id;
+    const action=btn.dataset.incomeAction;
+    if(action==="submit") await submitExistingIncome(id);
+    if(action==="approve") await approveIncome(id);
+    if(action==="reject") await rejectIncome(id);
+  }catch(err){
+    console.error(err);
+    toast("Aksi gagal: "+(err.message||"error"));
+  }finally{
+    btn.disabled=false;
+  }
+});
 
 (async()=>{
   const {data:{session}}=await sb.auth.getSession();
