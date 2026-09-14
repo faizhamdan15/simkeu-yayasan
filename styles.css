@@ -495,3 +495,68 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
   .transfer-side{grid-template-columns:1fr}
   .transfer-side-title,.balance-hint{grid-column:auto}
 }
+
+
+/* =========================================================
+   LAPORAN + ANALITIK v5
+   ========================================================= */
+.module-actions{display:flex;gap:9px;align-items:center}
+.report-top-btn{width:auto;margin:0;padding:0 14px}
+.report-filter-panel{margin-bottom:14px}
+.report-filter-grid{
+  display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) auto;
+  gap:10px;align-items:end
+}
+.filter-btn{height:43px;margin:0;white-space:nowrap}
+.report-stats{grid-template-columns:repeat(4,1fr)}
+.report-table{min-width:1080px}
+.report-description{
+  display:block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.report-amount-income{color:#087A4E}
+.report-amount-expense{color:#A93427}
+.report-amount-transfer{color:#9A521B}
+.analytics-filter-grid{
+  display:grid;grid-template-columns:180px minmax(220px,380px);gap:10px
+}
+.analytics-grid{
+  display:grid;grid-template-columns:1.45fr 1fr;gap:15px
+}
+.analytics-wide{min-width:0}
+.analytics-chart{height:300px;position:relative}
+.donut-analytics{height:245px}
+.percentage-list{
+  display:grid;gap:7px;margin-top:8px;max-height:145px;overflow:auto;padding-right:3px
+}
+.percentage-row{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;
+  align-items:center;padding:7px 9px;background:#FBF9F6;border:1px solid #EEE7DF;
+  border-radius:9px
+}
+.percentage-row .left{
+  display:flex;align-items:center;gap:7px;min-width:0
+}
+.percentage-dot{width:8px;height:8px;border-radius:50%;background:var(--brand);flex:none}
+.percentage-row strong{
+  font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.percentage-row span{font-size:9px;color:var(--brand-dark);font-weight:900}
+.report-print-title{display:none}
+
+@media(max-width:1180px){
+  .report-filter-grid{grid-template-columns:repeat(3,1fr)}
+  .analytics-grid{grid-template-columns:1fr}
+}
+@media(max-width:760px){
+  .module-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}
+  .report-top-btn{width:100%}
+  .report-filter-grid{grid-template-columns:1fr 1fr}
+  .filter-btn{grid-column:1/-1}
+  .report-stats{grid-template-columns:1fr 1fr}
+  .analytics-filter-grid{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+  .report-filter-grid{grid-template-columns:1fr}
+  .filter-btn{grid-column:auto}
+  .report-stats{grid-template-columns:1fr}
+}

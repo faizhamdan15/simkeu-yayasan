@@ -27,6 +27,16 @@ let transferBalances = [];
 let transferRowsCache = [];
 let pendingTransferSaveAction = "draft";
 
+let reportInstitutions = [];
+let reportRowsCache = [];
+
+let analyticsInstitutions = [];
+let analyticsRowsCache = [];
+let analyticsCashflowChart = null;
+let analyticsExpenseChart = null;
+let analyticsIncomeSourceChart = null;
+let analyticsInstitutionChart = null;
+
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
 }).format(Number(n||0));
@@ -1087,6 +1097,441 @@ async function rejectTransfer(id){
   toast("Transfer internal ditolak.");
 }
 
+
+/* =========================================================
+   LAPORAN
+   ========================================================= */
+
+function firstDayOfCurrentMonth(){
+  const d=new Date();
+  const x=new Date(d.getFullYear(),d.getMonth(),1);
+  const tz=x.getTimezoneOffset();
+  return new Date(x.getTime()-tz*60000).toISOString().slice(0,10);
+}
+
+async function loadReportModule(){
+  try{
+    if(!$("reportDateFrom").value) $("reportDateFrom").value=firstDayOfCurrentMonth();
+    if(!$("reportDateTo").value) $("reportDateTo").value=todayISO();
+
+    if(!reportInstitutions.length){
+      const {data,error}=await sb.from("institutions")
+        .select("id,code,name,institution_type")
+        .eq("is_active",true)
+        .order("name");
+      if(error) throw error;
+      reportInstitutions=data||[];
+      $("reportInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
+        reportInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+    }
+
+    await fetchReportTransactions();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat laporan: "+(err.message||"error"));
+  }
+}
+
+async function fetchReportTransactions(){
+  $("reportTransactionsBody").innerHTML=`<tr><td colspan="8" class="empty">Memuat laporan...</td></tr>`;
+
+  const from=$("reportDateFrom").value;
+  const to=$("reportDateTo").value;
+  if(!from||!to) throw new Error("Tanggal awal dan akhir wajib diisi.");
+  if(from>to) throw new Error("Tanggal awal tidak boleh melewati tanggal akhir.");
+
+  const {data,error}=await sb.from("transactions")
+    .select(`
+      id,
+      transaction_number,
+      transaction_date,
+      transaction_type,
+      institution_id,
+      amount,
+      description,
+      status,
+      created_at,
+      institutions:institution_id(name),
+      fund_sources:fund_source_id(name),
+      expense_categories:expense_category_id(name),
+      source_account:source_account_id(account_name,institution_id),
+      destination_account:destination_account_id(account_name,institution_id)
+    `)
+    .gte("transaction_date",from)
+    .lte("transaction_date",to)
+    .order("transaction_date",{ascending:false})
+    .order("created_at",{ascending:false})
+    .limit(1000);
+
+  if(error) throw error;
+
+  reportRowsCache=(data||[]).map(r=>{
+    const sourceInst=reportInstitutions.find(i=>i.id===r.source_account?.institution_id);
+    const destInst=reportInstitutions.find(i=>i.id===r.destination_account?.institution_id);
+    return {
+      ...r,
+      _sourceInstitutionName:sourceInst?.name||r.institutions?.name||"-",
+      _destinationInstitutionName:destInst?.name||"-"
+    };
+  });
+
+  renderReportRows();
+}
+
+function getFilteredReportRows(){
+  const institution=$("reportInstitution").value;
+  const type=$("reportType").value;
+  const status=$("reportStatus").value;
+
+  return reportRowsCache.filter(r=>{
+    const institutionMatch=
+      institution==="ALL" ||
+      r.institution_id===institution ||
+      r.source_account?.institution_id===institution ||
+      r.destination_account?.institution_id===institution;
+
+    return institutionMatch &&
+      (type==="ALL" || r.transaction_type===type) &&
+      (status==="ALL" || r.status===status);
+  });
+}
+
+function reportSourceCategory(row){
+  if(row.transaction_type==="INCOME") return row.fund_sources?.name||"Sumber Pemasukan";
+  if(row.transaction_type==="EXPENSE") return row.expense_categories?.name||"Kategori Pengeluaran";
+  return `${row._sourceInstitutionName} → ${row._destinationInstitutionName}`;
+}
+
+function renderReportRows(){
+  const rows=getFilteredReportRows();
+  const approved=rows.filter(r=>r.status==="APPROVED");
+
+  const income=approved.filter(r=>r.transaction_type==="INCOME").reduce((s,r)=>s+Number(r.amount||0),0);
+  const expense=approved.filter(r=>r.transaction_type==="EXPENSE").reduce((s,r)=>s+Number(r.amount||0),0);
+  const transfer=approved.filter(r=>r.transaction_type==="TRANSFER").reduce((s,r)=>s+Number(r.amount||0),0);
+
+  $("reportIncomeTotal").textContent=rupiah(income);
+  $("reportExpenseTotal").textContent=rupiah(expense);
+  $("reportTransferTotal").textContent=rupiah(transfer);
+  $("reportNetTotal").textContent=rupiah(income-expense);
+  $("reportResultInfo").textContent=`${rows.length} transaksi • ${formatDate($("reportDateFrom").value)} s.d. ${formatDate($("reportDateTo").value)}`;
+
+  $("reportTransactionsBody").innerHTML=rows.length?rows.map(r=>{
+    const amountClass=r.transaction_type==="INCOME"?"report-amount-income":
+      r.transaction_type==="EXPENSE"?"report-amount-expense":"report-amount-transfer";
+    return `
+      <tr>
+        <td>${formatDate(r.transaction_date)}</td>
+        <td><strong>${escapeHtml(r.transaction_number||"-")}</strong></td>
+        <td>${escapeHtml(r.institutions?.name||r._sourceInstitutionName||"-")}</td>
+        <td><span class="pill ${typeClass(r.transaction_type)}">${typeLabel(r.transaction_type)}</span></td>
+        <td>${escapeHtml(reportSourceCategory(r))}</td>
+        <td><span class="report-description" title="${escapeHtml(r.description||"")}">${escapeHtml(r.description||"-")}</span></td>
+        <td><strong class="${amountClass}">${rupiah(r.amount)}</strong></td>
+        <td><span class="pill ${statusClass(r.status)}">${escapeHtml(r.status)}</span></td>
+      </tr>`;
+  }).join(""):`<tr><td colspan="8" class="empty">Tidak ada transaksi sesuai filter.</td></tr>`;
+}
+
+function csvCell(value){
+  const s=String(value??"").replaceAll('"','""');
+  return `"${s}"`;
+}
+
+function exportReportCsv(){
+  const rows=getFilteredReportRows();
+  if(!rows.length){toast("Tidak ada data untuk diekspor.");return}
+
+  const header=["Tanggal","No Transaksi","Lembaga","Jenis","Sumber/Kategori","Keterangan","Nominal","Status"];
+  const body=rows.map(r=>[
+    r.transaction_date,
+    r.transaction_number||"",
+    r.institutions?.name||r._sourceInstitutionName||"",
+    typeLabel(r.transaction_type),
+    reportSourceCategory(r),
+    r.description||"",
+    Number(r.amount||0),
+    r.status
+  ]);
+
+  const csv="\uFEFF"+[header,...body].map(row=>row.map(csvCell).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`Laporan_SIMKEU_${$("reportDateFrom").value}_${$("reportDateTo").value}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast("Laporan CSV berhasil dibuat.");
+}
+
+function printReport(){
+  const rows=getFilteredReportRows();
+  if(!rows.length){toast("Tidak ada data untuk dicetak.");return}
+
+  const approved=rows.filter(r=>r.status==="APPROVED");
+  const income=approved.filter(r=>r.transaction_type==="INCOME").reduce((s,r)=>s+Number(r.amount||0),0);
+  const expense=approved.filter(r=>r.transaction_type==="EXPENSE").reduce((s,r)=>s+Number(r.amount||0),0);
+  const transfer=approved.filter(r=>r.transaction_type==="TRANSFER").reduce((s,r)=>s+Number(r.amount||0),0);
+
+  const tableRows=rows.map(r=>`
+    <tr>
+      <td>${formatDate(r.transaction_date)}</td>
+      <td>${escapeHtml(r.transaction_number||"-")}</td>
+      <td>${escapeHtml(r.institutions?.name||r._sourceInstitutionName||"-")}</td>
+      <td>${escapeHtml(typeLabel(r.transaction_type))}</td>
+      <td>${escapeHtml(reportSourceCategory(r))}</td>
+      <td>${escapeHtml(r.description||"-")}</td>
+      <td class="num">${rupiah(r.amount)}</td>
+      <td>${escapeHtml(r.status)}</td>
+    </tr>`).join("");
+
+  const w=window.open("","_blank","width=1200,height=800");
+  if(!w){toast("Browser memblokir jendela cetak. Izinkan pop-up untuk situs ini.");return}
+
+  w.document.write(`<!doctype html><html><head><title>Laporan SIMKEU</title>
+    <style>
+      body{font-family:Arial,sans-serif;color:#222;padding:28px;font-size:11px}
+      .head{display:flex;align-items:center;gap:14px;border-bottom:3px solid #F89921;padding-bottom:14px;margin-bottom:18px}
+      .head h1{font-size:18px;margin:0}.head p{margin:4px 0 0;color:#666}
+      .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}
+      .box{border:1px solid #ddd;padding:10px;border-radius:6px}.box span{display:block;color:#777;font-size:9px}.box strong{display:block;margin-top:4px;font-size:13px}
+      table{width:100%;border-collapse:collapse;margin-top:14px}
+      th,td{border:1px solid #ddd;padding:6px;text-align:left;vertical-align:top}
+      th{background:#f4f1ed}.num{text-align:right;white-space:nowrap}
+      .footer{margin-top:16px;color:#777;font-size:9px}
+      @media print{body{padding:0}.summary{break-inside:avoid}}
+    </style></head><body>
+    <div class="head"><div><h1>SIMKEU YAYASAN AR-RAUDLAH KAPEDI</h1>
+    <p>Laporan Keuangan ${formatDate($("reportDateFrom").value)} s.d. ${formatDate($("reportDateTo").value)}</p></div></div>
+    <div class="summary">
+      <div class="box"><span>Pemasukan Approved</span><strong>${rupiah(income)}</strong></div>
+      <div class="box"><span>Pengeluaran Approved</span><strong>${rupiah(expense)}</strong></div>
+      <div class="box"><span>Transfer Internal</span><strong>${rupiah(transfer)}</strong></div>
+      <div class="box"><span>Arus Bersih</span><strong>${rupiah(income-expense)}</strong></div>
+    </div>
+    <table><thead><tr><th>Tanggal</th><th>No.</th><th>Lembaga</th><th>Jenis</th><th>Sumber/Kategori</th><th>Keterangan</th><th>Nominal</th><th>Status</th></tr></thead>
+    <tbody>${tableRows}</tbody></table>
+    <div class="footer">Dicetak dari SIMKEU Yayasan Ar-Raudlah Kapedi • ${new Date().toLocaleString("id-ID")}</div>
+    <script>window.onload=()=>{window.print();}<\/script>
+    </body></html>`);
+  w.document.close();
+}
+
+
+/* =========================================================
+   ANALITIK
+   ========================================================= */
+
+async function loadAnalyticsModule(){
+  try{
+    if(!$("analyticsYear").options.length){
+      const now=new Date().getFullYear();
+      const years=[];
+      for(let y=now-4;y<=now+1;y++) years.push(y);
+      $("analyticsYear").innerHTML=years.reverse().map(y=>`<option value="${y}">${y}</option>`).join("");
+      $("analyticsYear").value=String(now);
+    }
+
+    if(!analyticsInstitutions.length){
+      const {data,error}=await sb.from("institutions")
+        .select("id,code,name,institution_type")
+        .eq("is_active",true)
+        .order("name");
+      if(error) throw error;
+      analyticsInstitutions=data||[];
+      $("analyticsInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
+        analyticsInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+    }
+
+    await fetchAnalyticsData();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat analitik: "+(err.message||"error"));
+  }
+}
+
+async function fetchAnalyticsData(){
+  const year=Number($("analyticsYear").value);
+  const start=`${year}-01-01`;
+  const next=`${year+1}-01-01`;
+
+  const {data,error}=await sb.from("transactions")
+    .select(`
+      id,
+      transaction_date,
+      transaction_type,
+      institution_id,
+      amount,
+      status,
+      institutions:institution_id(name),
+      fund_sources:fund_source_id(name),
+      expense_categories:expense_category_id(name),
+      source_account:source_account_id(institution_id),
+      destination_account:destination_account_id(institution_id)
+    `)
+    .eq("status","APPROVED")
+    .gte("transaction_date",start)
+    .lt("transaction_date",next)
+    .order("transaction_date",{ascending:true})
+    .limit(5000);
+
+  if(error) throw error;
+  analyticsRowsCache=data||[];
+  renderAnalytics();
+}
+
+function getFilteredAnalyticsRows(){
+  const institution=$("analyticsInstitution").value;
+  if(institution==="ALL") return analyticsRowsCache;
+
+  return analyticsRowsCache.filter(r=>
+    r.institution_id===institution ||
+    r.source_account?.institution_id===institution ||
+    r.destination_account?.institution_id===institution
+  );
+}
+
+function renderAnalytics(){
+  const rows=getFilteredAnalyticsRows();
+  const externalRows=rows.filter(r=>r.transaction_type!=="TRANSFER");
+  const incomeRows=externalRows.filter(r=>r.transaction_type==="INCOME");
+  const expenseRows=externalRows.filter(r=>r.transaction_type==="EXPENSE");
+
+  const income=incomeRows.reduce((s,r)=>s+Number(r.amount||0),0);
+  const expense=expenseRows.reduce((s,r)=>s+Number(r.amount||0),0);
+  const ratio=income>0 ? (expense/income*100) : 0;
+
+  $("analyticsIncomeTotal").textContent=rupiah(income);
+  $("analyticsExpenseTotal").textContent=rupiah(expense);
+  $("analyticsNetTotal").textContent=rupiah(income-expense);
+  $("analyticsExpenseRatio").textContent=(Math.round(ratio*10)/10).toLocaleString("id-ID")+"%";
+
+  renderAnalyticsCashflow(rows);
+  renderAnalyticsExpense(rows);
+  renderAnalyticsIncomeSources(rows);
+  renderAnalyticsInstitutions(rows);
+}
+
+function renderAnalyticsCashflow(rows){
+  const inc=Array(12).fill(0), exp=Array(12).fill(0);
+  rows.forEach(r=>{
+    const m=new Date(r.transaction_date+"T00:00:00").getMonth();
+    if(r.transaction_type==="INCOME") inc[m]+=Number(r.amount||0);
+    if(r.transaction_type==="EXPENSE") exp[m]+=Number(r.amount||0);
+  });
+
+  if(analyticsCashflowChart) analyticsCashflowChart.destroy();
+  analyticsCashflowChart=new Chart($("analyticsCashflowChart"),{
+    type:"bar",
+    data:{
+      labels:["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"],
+      datasets:[
+        {label:"Pemasukan",data:inc,backgroundColor:"#F89921",borderRadius:5},
+        {label:"Pengeluaran",data:exp,backgroundColor:"#4A4038",borderRadius:5}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:"top",align:"end"},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${rupiah(c.raw)}`}}},
+      scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{callback:v=>shortMoney(v)},grid:{color:"#F0ECE7"}}}
+    }
+  });
+}
+
+function renderAnalyticsExpense(rows){
+  const map=new Map();
+  rows.filter(r=>r.transaction_type==="EXPENSE").forEach(r=>{
+    const name=r.expense_categories?.name||"Lainnya";
+    map.set(name,(map.get(name)||0)+Number(r.amount||0));
+  });
+
+  let labels=[...map.keys()], values=[...map.values()];
+  const total=values.reduce((s,v)=>s+v,0);
+  const colors=["#F89921","#CD6828","#4A4038","#E9B44C","#8C3F20","#F2C078","#6B5A49","#C97A40","#A69A8B","#DDA15E","#7F5539","#BC6C25"];
+  const empty=!values.length;
+  if(empty){labels=["Belum ada pengeluaran"];values=[1]}
+
+  if(analyticsExpenseChart) analyticsExpenseChart.destroy();
+  analyticsExpenseChart=new Chart($("analyticsExpenseChart"),{
+    type:"doughnut",
+    data:{labels,datasets:[{data:values,backgroundColor:empty?["#E7E3DE"]:colors.slice(0,values.length),borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:"68%",plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>empty?"Belum ada data":`${c.label}: ${rupiah(c.raw)}`}}}}
+  });
+
+  if(empty){
+    $("analyticsExpensePercentList").innerHTML=`<div class="empty">Belum ada pengeluaran.</div>`;
+  }else{
+    $("analyticsExpensePercentList").innerHTML=labels.map((name,i)=>{
+      const pct=total>0 ? values[i]/total*100 : 0;
+      return `<div class="percentage-row">
+        <div class="left"><i class="percentage-dot" style="background:${colors[i%colors.length]}"></i><strong title="${escapeHtml(name)}">${escapeHtml(name)}</strong></div>
+        <span>${pct.toFixed(1).replace(".",",")}%</span>
+      </div>`;
+    }).join("");
+  }
+}
+
+function renderAnalyticsIncomeSources(rows){
+  const map=new Map();
+  rows.filter(r=>r.transaction_type==="INCOME").forEach(r=>{
+    const name=r.fund_sources?.name||"Sumber Lainnya";
+    map.set(name,(map.get(name)||0)+Number(r.amount||0));
+  });
+
+  let labels=[...map.keys()], values=[...map.values()];
+  const empty=!values.length;
+  if(empty){labels=["Belum ada pemasukan"];values=[1]}
+
+  if(analyticsIncomeSourceChart) analyticsIncomeSourceChart.destroy();
+  analyticsIncomeSourceChart=new Chart($("analyticsIncomeSourceChart"),{
+    type:"doughnut",
+    data:{labels,datasets:[{data:values,backgroundColor:empty?["#E7E3DE"]:["#F89921","#2F855A","#D6A84B","#3B82F6","#8B5CF6","#14B8A6","#64748B","#C97A40"],borderWidth:0}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,cutout:"68%",
+      plugins:{legend:{position:"bottom",labels:{usePointStyle:true,boxWidth:7,font:{size:9}}},tooltip:{callbacks:{label:c=>empty?"Belum ada data":`${c.label}: ${rupiah(c.raw)}`}}}
+    }
+  });
+}
+
+function renderAnalyticsInstitutions(rows){
+  const map=new Map();
+  analyticsInstitutions.forEach(i=>map.set(i.id,{name:i.name,income:0,expense:0}));
+
+  rows.forEach(r=>{
+    if(r.transaction_type==="INCOME"){
+      const x=map.get(r.institution_id);
+      if(x)x.income+=Number(r.amount||0);
+    }
+    if(r.transaction_type==="EXPENSE"){
+      const x=map.get(r.institution_id);
+      if(x)x.expense+=Number(r.amount||0);
+    }
+  });
+
+  const relevant=[...map.values()].filter(x=>x.income>0||x.expense>0);
+  const dataRows=relevant.length?relevant:[{name:"Belum ada data",income:0,expense:0}];
+
+  if(analyticsInstitutionChart) analyticsInstitutionChart.destroy();
+  analyticsInstitutionChart=new Chart($("analyticsInstitutionChart"),{
+    type:"bar",
+    data:{
+      labels:dataRows.map(x=>x.name),
+      datasets:[
+        {label:"Pemasukan",data:dataRows.map(x=>x.income),backgroundColor:"#F89921",borderRadius:5},
+        {label:"Pengeluaran",data:dataRows.map(x=>x.expense),backgroundColor:"#4A4038",borderRadius:5}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:"top",align:"end"},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${rupiah(c.raw)}`}}},
+      scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{callback:v=>shortMoney(v)},grid:{color:"#F0ECE7"}}}
+    }
+  });
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -1117,10 +1562,16 @@ $("refreshBtn").addEventListener("click",async()=>{
   const incomeVisible=!$("incomeSection").classList.contains("hidden");
   const expenseVisible=!$("expenseSection").classList.contains("hidden");
   const transferVisible=!$("transferSection").classList.contains("hidden");
+  const reportVisible=!$("reportSection").classList.contains("hidden");
+  const analyticsVisible=!$("analyticsSection").classList.contains("hidden");
+
   if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
   else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
   else if(transferVisible) await Promise.all([loadDashboard(),loadTransferModule()]);
+  else if(reportVisible) await Promise.all([loadDashboard(),fetchReportTransactions()]);
+  else if(analyticsVisible) await Promise.all([loadDashboard(),fetchAnalyticsData()]);
   else await loadDashboard();
+
   toast("Data diperbarui.");
 });
 
@@ -1145,7 +1596,12 @@ async function switchView(v){
   $("incomeSection").classList.toggle("hidden",v!=="pemasukan");
   $("expenseSection").classList.toggle("hidden",v!=="pengeluaran");
   $("transferSection").classList.toggle("hidden",v!=="transfer");
-  $("placeholderSection").classList.toggle("hidden",v==="dashboard"||v==="pemasukan"||v==="pengeluaran"||v==="transfer");
+  $("reportSection").classList.toggle("hidden",v!=="laporan");
+  $("analyticsSection").classList.toggle("hidden",v!=="analitik");
+  $("placeholderSection").classList.toggle(
+    "hidden",
+    ["dashboard","pemasukan","pengeluaran","transfer","laporan","analitik"].includes(v)
+  );
 
   if(v==="pemasukan"){
     await loadIncomeModule();
@@ -1153,6 +1609,10 @@ async function switchView(v){
     await loadExpenseModule();
   }else if(v==="transfer"){
     await loadTransferModule();
+  }else if(v==="laporan"){
+    await loadReportModule();
+  }else if(v==="analitik"){
+    await loadAnalyticsModule();
   }else if(v!=="dashboard"){
     $("placeholderTitle").textContent=meta[v][0];
   }
@@ -1220,6 +1680,36 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
 });
 
 
+
+
+/* Report events */
+$("applyReportFilterBtn").addEventListener("click",async()=>{
+  try{
+    await fetchReportTransactions();
+    toast("Filter laporan diterapkan.");
+  }catch(err){
+    console.error(err);toast("Gagal menerapkan filter: "+(err.message||"error"));
+  }
+});
+$("reportInstitution").addEventListener("change",renderReportRows);
+$("reportType").addEventListener("change",renderReportRows);
+$("reportStatus").addEventListener("change",renderReportRows);
+$("exportReportCsvBtn").addEventListener("click",exportReportCsv);
+$("printReportBtn").addEventListener("click",printReport);
+
+/* Analytics events */
+$("analyticsYear").addEventListener("change",async()=>{
+  try{await fetchAnalyticsData()}catch(err){console.error(err);toast("Gagal memuat analitik: "+(err.message||"error"))}
+});
+$("analyticsInstitution").addEventListener("change",renderAnalytics);
+$("refreshAnalyticsBtn").addEventListener("click",async()=>{
+  try{
+    await fetchAnalyticsData();
+    toast("Analitik diperbarui.");
+  }catch(err){
+    console.error(err);toast("Gagal memperbarui analitik: "+(err.message||"error"));
+  }
+});
 
 /* Transfer events */
 $("transferSourceInstitution").addEventListener("change",refreshTransferSourceAccounts);

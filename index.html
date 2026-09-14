@@ -627,6 +627,196 @@
           </div>
         </div>
 
+
+        <div id="reportSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">REKAP KEUANGAN</span>
+              <h1>Laporan</h1>
+              <p>Filter transaksi berdasarkan periode, lembaga, jenis transaksi, dan status.</p>
+            </div>
+            <div class="module-actions">
+              <button id="exportReportCsvBtn" class="secondary-btn report-top-btn" type="button">↓ Export CSV</button>
+              <button id="printReportBtn" class="brand-btn report-top-btn" type="button">Cetak / PDF</button>
+            </div>
+          </div>
+
+          <article class="panel report-filter-panel">
+            <div class="report-filter-grid">
+              <label class="form-field">
+                <span>Dari Tanggal</span>
+                <input id="reportDateFrom" type="date">
+              </label>
+              <label class="form-field">
+                <span>Sampai Tanggal</span>
+                <input id="reportDateTo" type="date">
+              </label>
+              <label class="form-field">
+                <span>Lembaga</span>
+                <select id="reportInstitution">
+                  <option value="ALL">Semua Lembaga</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>Jenis</span>
+                <select id="reportType">
+                  <option value="ALL">Semua Jenis</option>
+                  <option value="INCOME">Pemasukan</option>
+                  <option value="EXPENSE">Pengeluaran</option>
+                  <option value="TRANSFER">Transfer Internal</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>Status</span>
+                <select id="reportStatus">
+                  <option value="ALL">Semua Status</option>
+                  <option value="APPROVED">APPROVED</option>
+                  <option value="SUBMITTED">SUBMITTED</option>
+                  <option value="DRAFT">DRAFT</option>
+                  <option value="REJECTED">REJECTED</option>
+                  <option value="VOID">VOID</option>
+                </select>
+              </label>
+              <button id="applyReportFilterBtn" class="brand-btn filter-btn" type="button">Terapkan Filter</button>
+            </div>
+          </article>
+
+          <div class="module-stats report-stats">
+            <article class="mini-stat">
+              <span>Pemasukan Approved</span>
+              <strong id="reportIncomeTotal">Rp0</strong>
+              <small>Transaksi eksternal masuk</small>
+            </article>
+            <article class="mini-stat">
+              <span>Pengeluaran Approved</span>
+              <strong id="reportExpenseTotal">Rp0</strong>
+              <small>Transaksi eksternal keluar</small>
+            </article>
+            <article class="mini-stat">
+              <span>Transfer Internal</span>
+              <strong id="reportTransferTotal">Rp0</strong>
+              <small>Tidak memengaruhi total konsolidasi</small>
+            </article>
+            <article class="mini-stat">
+              <span>Arus Bersih</span>
+              <strong id="reportNetTotal">Rp0</strong>
+              <small>Pemasukan − Pengeluaran</small>
+            </article>
+          </div>
+
+          <article class="panel">
+            <div class="panel-title row-title">
+              <div>
+                <h3>Detail Transaksi</h3>
+                <p id="reportResultInfo">Memuat laporan...</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="report-table">
+                <thead>
+                  <tr>
+                    <th>Tanggal</th>
+                    <th>No. Transaksi</th>
+                    <th>Lembaga</th>
+                    <th>Jenis</th>
+                    <th>Sumber / Kategori</th>
+                    <th>Keterangan</th>
+                    <th>Nominal</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="reportTransactionsBody">
+                  <tr><td colspan="8" class="empty">Memuat...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <div id="analyticsSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">DIAGRAM & PERSENTASE</span>
+              <h1>Analitik Keuangan</h1>
+              <p>Baca pola pemasukan, pengeluaran, komposisi sektor, dan perbandingan lembaga.</p>
+            </div>
+            <button id="refreshAnalyticsBtn" class="brand-btn" type="button">↻ Perbarui Analitik</button>
+          </div>
+
+          <article class="panel report-filter-panel">
+            <div class="analytics-filter-grid">
+              <label class="form-field">
+                <span>Tahun</span>
+                <select id="analyticsYear"></select>
+              </label>
+              <label class="form-field">
+                <span>Lembaga</span>
+                <select id="analyticsInstitution">
+                  <option value="ALL">Semua Lembaga</option>
+                </select>
+              </label>
+            </div>
+          </article>
+
+          <div class="module-stats report-stats">
+            <article class="mini-stat">
+              <span>Total Pemasukan</span>
+              <strong id="analyticsIncomeTotal">Rp0</strong>
+              <small>APPROVED</small>
+            </article>
+            <article class="mini-stat">
+              <span>Total Pengeluaran</span>
+              <strong id="analyticsExpenseTotal">Rp0</strong>
+              <small>APPROVED</small>
+            </article>
+            <article class="mini-stat">
+              <span>Arus Bersih</span>
+              <strong id="analyticsNetTotal">Rp0</strong>
+              <small>Pemasukan − Pengeluaran</small>
+            </article>
+            <article class="mini-stat">
+              <span>Rasio Pengeluaran</span>
+              <strong id="analyticsExpenseRatio">0%</strong>
+              <small>Pengeluaran ÷ pemasukan</small>
+            </article>
+          </div>
+
+          <div class="analytics-grid">
+            <article class="panel analytics-wide">
+              <div class="panel-title">
+                <h3>Arus Kas Bulanan</h3>
+                <p>Pemasukan dan pengeluaran APPROVED</p>
+              </div>
+              <div class="analytics-chart"><canvas id="analyticsCashflowChart"></canvas></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-title">
+                <h3>Komposisi Pengeluaran</h3>
+                <p>Persentase berdasarkan sektor/kategori</p>
+              </div>
+              <div class="analytics-chart donut-analytics"><canvas id="analyticsExpenseChart"></canvas></div>
+              <div id="analyticsExpensePercentList" class="percentage-list"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-title">
+                <h3>Sumber Pemasukan</h3>
+                <p>Persentase dana berdasarkan sumber</p>
+              </div>
+              <div class="analytics-chart donut-analytics"><canvas id="analyticsIncomeSourceChart"></canvas></div>
+            </article>
+
+            <article class="panel analytics-wide">
+              <div class="panel-title">
+                <h3>Perbandingan Lembaga</h3>
+                <p>Pemasukan dan pengeluaran eksternal per lembaga</p>
+              </div>
+              <div class="analytics-chart"><canvas id="analyticsInstitutionChart"></canvas></div>
+            </article>
+          </div>
+        </div>
+
         <div id="placeholderSection" class="placeholder hidden">
           <div class="placeholder-card">
             <div class="big-icon">⚙</div>
