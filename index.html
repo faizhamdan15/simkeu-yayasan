@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SIMKEU YAYASAN</title>
+  <meta name="theme-color" content="#0B7A4B" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+
+  <section id="loginView" class="login-shell">
+    <div class="login-hero">
+      <div class="brand">
+        <div class="logo">S</div>
+        <div>
+          <strong>SIMKEU YAYASAN</strong>
+          <span>Sistem Informasi Manajemen Keuangan</span>
+        </div>
+      </div>
+
+      <div class="hero-copy">
+        <div class="eyebrow">TRANSPARAN • AKUNTABEL • TERINTEGRASI</div>
+        <h1>Satu dashboard untuk keuangan Yayasan dan seluruh lembaga.</h1>
+        <p>Monitor pemasukan, pengeluaran, transfer internal, saldo, dan bukti transaksi secara terpusat.</p>
+        <div class="feature-row">
+          <span>✓ Multi Lembaga</span>
+          <span>✓ RLS Security</span>
+          <span>✓ Laporan Real-time</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="login-side">
+      <form id="loginForm" class="login-card">
+        <div class="mobile-brand">
+          <div class="logo">S</div>
+          <div><strong>SIMKEU YAYASAN</strong><span>Keuangan Terintegrasi</span></div>
+        </div>
+        <h2>Masuk ke SIMKEU</h2>
+        <p>Gunakan akun yang sudah dibuat pada Supabase Authentication.</p>
+
+        <label>
+          Email
+          <input id="email" type="email" autocomplete="email" placeholder="nama@email.com" required />
+        </label>
+
+        <label>
+          Password
+          <div class="password-wrap">
+            <input id="password" type="password" autocomplete="current-password" placeholder="Masukkan password" required />
+            <button type="button" id="togglePassword">Lihat</button>
+          </div>
+        </label>
+
+        <button id="loginButton" class="primary-btn" type="submit">Masuk</button>
+        <div id="loginError" class="error hidden"></div>
+      </form>
+    </div>
+  </section>
+
+  <div id="appView" class="app hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <div class="logo small">S</div>
+        <div><strong>SIMKEU</strong><span>YAYASAN</span></div>
+        <button id="closeSidebar" class="close-btn">×</button>
+      </div>
+
+      <nav>
+        <button class="nav active" data-view="dashboard">▦ Dashboard</button>
+        <button class="nav" data-view="pemasukan">↓ Pemasukan</button>
+        <button class="nav" data-view="pengeluaran">↑ Pengeluaran</button>
+        <button class="nav" data-view="transfer">⇄ Transfer Internal</button>
+        <button class="nav" data-view="bukti">▤ Bukti Transaksi</button>
+        <button class="nav" data-view="lembaga">▣ Lembaga</button>
+        <button class="nav" data-view="laporan">▥ Laporan</button>
+        <button class="nav" data-view="analitik">⌁ Analitik</button>
+        <button class="nav" data-view="pengguna">♙ Pengguna</button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="secure">🔒 Database dilindungi RLS</div>
+        <button id="logoutBtn" class="logout">Keluar</button>
+      </div>
+    </aside>
+
+    <div id="backdrop" class="backdrop hidden"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="top-left">
+          <button id="menuBtn" class="menu-btn">☰</button>
+          <div>
+            <h2 id="pageTitle">Dashboard</h2>
+            <p id="pageSubtitle">Ringkasan keuangan Yayasan dan lembaga</p>
+          </div>
+        </div>
+        <div class="top-right">
+          <button id="refreshBtn" class="outline-btn">↻ Refresh</button>
+          <div class="user">
+            <div id="avatar" class="avatar">F</div>
+            <div><strong id="userName">Pengguna</strong><span id="userRole">-</span></div>
+          </div>
+        </div>
+      </header>
+
+      <section class="content">
+        <div id="dashboardSection">
+          <div class="welcome">
+            <div>
+              <div class="kicker">RINGKASAN HARI INI</div>
+              <h1>Selamat datang, <span id="welcomeName">Pengguna</span></h1>
+              <p id="welcomeInstitution">Memuat...</p>
+            </div>
+            <div id="today" class="date-pill"></div>
+          </div>
+
+          <div class="stats">
+            <article class="stat">
+              <span>Total Saldo</span>
+              <strong id="totalBalance">Rp0</strong>
+              <small>Seluruh akun yang dapat diakses</small>
+            </article>
+            <article class="stat">
+              <span>Pemasukan Bulan Ini</span>
+              <strong id="monthlyIncome">Rp0</strong>
+              <small>Transaksi APPROVED</small>
+            </article>
+            <article class="stat">
+              <span>Pengeluaran Bulan Ini</span>
+              <strong id="monthlyExpense">Rp0</strong>
+              <small>Transaksi APPROVED</small>
+            </article>
+            <article class="stat warning">
+              <span>Menunggu Approval</span>
+              <strong id="pendingCount">0</strong>
+              <small>Status SUBMITTED</small>
+            </article>
+          </div>
+
+          <div class="grid two">
+            <article class="panel wide">
+              <div class="panel-title"><h3>Arus Kas Bulanan</h3><p>Pemasukan vs pengeluaran tahun berjalan</p></div>
+              <div class="chart"><canvas id="cashflowChart"></canvas></div>
+            </article>
+            <article class="panel">
+              <div class="panel-title"><h3>Komposisi Pengeluaran</h3><p>Berdasarkan kategori bulan ini</p></div>
+              <div class="chart"><canvas id="expenseChart"></canvas></div>
+            </article>
+          </div>
+
+          <div class="grid two lower">
+            <article class="panel">
+              <div class="panel-title"><h3>Saldo per Lembaga</h3><p>Kas dan rekening bank</p></div>
+              <div id="institutionBalances" class="institution-list"></div>
+            </article>
+
+            <article class="panel wide">
+              <div class="panel-title"><h3>Transaksi Terbaru</h3><p>Aktivitas keuangan terkini</p></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tanggal</th>
+                      <th>No. Transaksi</th>
+                      <th>Jenis</th>
+                      <th>Lembaga</th>
+                      <th>Nominal</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recentTransactions">
+                    <tr><td colspan="6" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div id="placeholderSection" class="placeholder hidden">
+          <div class="placeholder-card">
+            <div class="big-icon">⚙</div>
+            <h2 id="placeholderTitle">Modul</h2>
+            <p>Kerangka menu sudah tersedia. Fungsi modul ini kita aktifkan pada tahap berikutnya setelah login dan dashboard berhasil diuji.</p>
+            <button id="backDashboard" class="primary-btn compact">Kembali ke Dashboard</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
