@@ -37,6 +37,9 @@ let analyticsExpenseChart = null;
 let analyticsIncomeSourceChart = null;
 let analyticsInstitutionChart = null;
 
+let masterInstitutions = [];
+let usersRowsCache = [];
+
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
 }).format(Number(n||0));
@@ -1532,6 +1535,151 @@ function renderAnalyticsInstitutions(rows){
   });
 }
 
+
+/* =========================================================
+   MASTER LEMBAGA
+   ========================================================= */
+
+async function loadInstitutionsModule(){
+  try{
+    const {data,error}=await sb.from("institutions")
+      .select("id,code,name,institution_type,address,phone,is_active,created_at")
+      .order("institution_type")
+      .order("name");
+    if(error) throw error;
+
+    masterInstitutions=data||[];
+
+    $("institutionCards").innerHTML=masterInstitutions.length
+      ? masterInstitutions.map(i=>`
+        <article class="institution-master-card">
+          <div class="institution-master-head">
+            <div class="institution-master-icon">${escapeHtml(i.code||i.name.slice(0,3).toUpperCase())}</div>
+            <span class="${i.is_active?'active-chip':'inactive-chip'}">${i.is_active?'AKTIF':'NONAKTIF'}</span>
+          </div>
+          <h3>${escapeHtml(i.name)}</h3>
+          <p>${escapeHtml(i.address||'Alamat belum diisi')}</p>
+          <div class="institution-meta">
+            <div><span>Tipe</span><strong>${escapeHtml(i.institution_type)}</strong></div>
+            <div><span>Telepon</span><strong>${escapeHtml(i.phone||'-')}</strong></div>
+          </div>
+        </article>`).join("")
+      : `<div class="empty">Belum ada lembaga.</div>`;
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat lembaga: "+(err.message||"error"));
+  }
+}
+
+
+/* =========================================================
+   MANAJEMEN PENGGUNA / SUB LOGIN
+   ========================================================= */
+
+async function loadUsersModule(){
+  try{
+    if(currentProfile?.role!=="SUPER_ADMIN"){
+      $("userProfileFormCard").classList.add("hidden");
+      $("newUserProfileBtn").classList.add("hidden");
+    }else{
+      $("userProfileFormCard").classList.remove("hidden");
+      $("newUserProfileBtn").classList.remove("hidden");
+    }
+
+    if(!masterInstitutions.length){
+      const {data,error}=await sb.from("institutions")
+        .select("id,code,name,institution_type,is_active")
+        .eq("is_active",true)
+        .order("name");
+      if(error) throw error;
+      masterInstitutions=data||[];
+    }
+
+    $("profileInstitution").innerHTML=`<option value="">Pilih lembaga</option>`+
+      masterInstitutions.filter(i=>i.is_active!==false)
+        .map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+
+    const {data,error}=await sb.from("profiles")
+      .select(`
+        id,
+        full_name,
+        role,
+        institution_id,
+        phone,
+        is_active,
+        created_at,
+        institutions:institution_id(name,code)
+      `)
+      .order("full_name");
+    if(error) throw error;
+
+    usersRowsCache=data||[];
+    renderUsersTable();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat pengguna: "+(err.message||"error"));
+  }
+}
+
+function renderUsersTable(){
+  $("usersTableBody").innerHTML=usersRowsCache.length
+    ? usersRowsCache.map(u=>`
+      <tr>
+        <td><strong>${escapeHtml(u.full_name||'-')}</strong></td>
+        <td><span class="role-chip">${escapeHtml(roleLabel(u.role))}</span></td>
+        <td>${escapeHtml(u.institutions?.name||'-')}</td>
+        <td>${escapeHtml(u.phone||'-')}</td>
+        <td><span class="${u.is_active?'active-chip':'inactive-chip'}">${u.is_active?'AKTIF':'NONAKTIF'}</span></td>
+        <td><div class="uid-cell" title="${escapeHtml(u.id)}">${escapeHtml(u.id)}</div></td>
+      </tr>`).join("")
+    : `<tr><td colspan="6" class="empty">Belum ada pengguna.</td></tr>`;
+}
+
+function resetUserProfileForm(){
+  $("userProfileForm").reset();
+}
+
+async function saveUserProfile(){
+  if(currentProfile?.role!=="SUPER_ADMIN"){
+    throw new Error("Hanya Super Admin yang dapat menambah pengguna.");
+  }
+
+  const id=$("profileUserId").value.trim();
+  const full_name=$("profileFullName").value.trim();
+  const role=$("profileRole").value;
+  const institution_id=$("profileInstitution").value;
+  const phone=$("profilePhone").value.trim();
+
+  const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if(!uuidPattern.test(id)) throw new Error("UID tidak valid. Copy UID lengkap dari Supabase Authentication.");
+  if(!full_name||!role||!institution_id) throw new Error("Nama, role, dan lembaga wajib diisi.");
+  if(role==="SUPER_ADMIN") throw new Error("Penambahan SUPER_ADMIN kedua tidak diizinkan dari form ini.");
+
+  const payload={
+    id,
+    full_name,
+    role,
+    institution_id,
+    phone:phone||null,
+    is_active:true
+  };
+
+  const {error}=await sb.from("profiles").insert(payload);
+  if(error){
+    if(error.code==="23503"){
+      throw new Error("UID tidak ditemukan di Supabase Authentication. Buat user terlebih dahulu di Authentication → Users.");
+    }
+    if(error.code==="23505"){
+      throw new Error("UID tersebut sudah terhubung ke profil SIMKEU.");
+    }
+    throw error;
+  }
+
+  resetUserProfileForm();
+  await loadUsersModule();
+  toast("Pengguna berhasil dihubungkan ke SIMKEU.");
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -1598,9 +1746,11 @@ async function switchView(v){
   $("transferSection").classList.toggle("hidden",v!=="transfer");
   $("reportSection").classList.toggle("hidden",v!=="laporan");
   $("analyticsSection").classList.toggle("hidden",v!=="analitik");
+  $("institutionsSection").classList.toggle("hidden",v!=="lembaga");
+  $("usersSection").classList.toggle("hidden",v!=="pengguna");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","laporan","analitik"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","laporan","analitik","lembaga","pengguna"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -1613,6 +1763,10 @@ async function switchView(v){
     await loadReportModule();
   }else if(v==="analitik"){
     await loadAnalyticsModule();
+  }else if(v==="lembaga"){
+    await loadInstitutionsModule();
+  }else if(v==="pengguna"){
+    await loadUsersModule();
   }else if(v!=="dashboard"){
     $("placeholderTitle").textContent=meta[v][0];
   }
@@ -1681,6 +1835,31 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
 
 
 
+
+
+/* Institution + User events */
+$("refreshUsersBtn").addEventListener("click",async()=>{
+  await loadUsersModule();
+  toast("Daftar pengguna diperbarui.");
+});
+
+$("newUserProfileBtn").addEventListener("click",()=>{
+  $("userProfileFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+  setTimeout(()=>$("profileUserId").focus(),300);
+});
+
+$("userProfileForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  $("saveUserProfileBtn").disabled=true;
+  try{
+    await saveUserProfile();
+  }catch(err){
+    console.error(err);
+    toast("Gagal menyimpan pengguna: "+(err.message||"error"));
+  }finally{
+    $("saveUserProfileBtn").disabled=false;
+  }
+});
 
 /* Report events */
 $("applyReportFilterBtn").addEventListener("click",async()=>{

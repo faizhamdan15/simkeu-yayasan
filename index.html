@@ -817,6 +817,118 @@
           </div>
         </div>
 
+
+        <div id="institutionsSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">MASTER UNIT</span>
+              <h1>Lembaga</h1>
+              <p>Daftar unit yang berada di bawah Yayasan Ar-Raudlah Kapedi.</p>
+            </div>
+          </div>
+
+          <div id="institutionCards" class="institution-master-grid">
+            <div class="empty">Memuat lembaga...</div>
+          </div>
+        </div>
+
+        <div id="usersSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">SUB-LOGIN LEMBAGA</span>
+              <h1>Pengguna</h1>
+              <p>Hubungkan akun Supabase Authentication dengan role dan lembaga di SIMKEU.</p>
+            </div>
+            <button id="newUserProfileBtn" class="brand-btn" type="button">+ Hubungkan Pengguna</button>
+          </div>
+
+          <div class="user-management-note">
+            <strong>Alur aman pembuatan akun</strong>
+            <span>1) Buat user di Supabase → Authentication → Users. 2) Copy UID user. 3) Masukkan UID tersebut di form SIMKEU di bawah. Password tidak pernah disimpan di tabel SIMKEU.</span>
+          </div>
+
+          <div class="user-management-layout">
+            <article id="userProfileFormCard" class="panel form-panel">
+              <div class="panel-title">
+                <h3>Hubungkan Akun Login</h3>
+                <p>Hanya Super Admin yang dapat menambah profil pengguna.</p>
+              </div>
+
+              <form id="userProfileForm" class="finance-form">
+                <div class="form-grid">
+                  <label class="form-field full">
+                    <span>User UID dari Supabase Authentication</span>
+                    <input id="profileUserId" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Nama Lengkap</span>
+                    <input id="profileFullName" type="text" placeholder="Contoh: Bendahara MTs" required>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Role</span>
+                    <select id="profileRole" required>
+                      <option value="">Pilih role</option>
+                      <option value="FOUNDATION_TREASURER">Bendahara Yayasan</option>
+                      <option value="INSTITUTION_ADMIN">Admin/Bendahara Lembaga</option>
+                      <option value="VIEWER">Viewer</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Lembaga</span>
+                    <select id="profileInstitution" required>
+                      <option value="">Pilih lembaga</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Nomor HP (opsional)</span>
+                    <input id="profilePhone" type="text" placeholder="08xxxxxxxxxx">
+                  </label>
+                </div>
+
+                <div class="form-note">
+                  <strong>Hak akses:</strong> Admin lembaga hanya dapat melihat data lembaganya sendiri. Super Admin/Bendahara Yayasan dapat memonitor seluruh lembaga.
+                </div>
+
+                <div class="form-actions">
+                  <button id="saveUserProfileBtn" class="brand-btn" type="submit">Simpan Pengguna</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Daftar Pengguna</h3>
+                  <p>Role, lembaga, dan status akun SIMKEU.</p>
+                </div>
+                <button id="refreshUsersBtn" class="outline-btn small-action" type="button">↻ Refresh</button>
+              </div>
+
+              <div class="table-wrap">
+                <table class="income-table">
+                  <thead>
+                    <tr>
+                      <th>Nama</th>
+                      <th>Role</th>
+                      <th>Lembaga</th>
+                      <th>HP</th>
+                      <th>Status</th>
+                      <th>UID</th>
+                    </tr>
+                  </thead>
+                  <tbody id="usersTableBody">
+                    <tr><td colspan="6" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </div>
+
         <div id="placeholderSection" class="placeholder hidden">
           <div class="placeholder-card">
             <div class="big-icon">⚙</div>

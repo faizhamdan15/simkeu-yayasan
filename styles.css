@@ -560,3 +560,63 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
   .filter-btn{grid-column:auto}
   .report-stats{grid-template-columns:1fr}
 }
+
+
+/* =========================================================
+   LEMBAGA + PENGGUNA v6
+   ========================================================= */
+.institution-master-grid{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px
+}
+.institution-master-card{
+  background:#fff;border:1px solid var(--line);border-radius:17px;padding:18px;
+  box-shadow:0 7px 20px rgba(40,30,18,.03)
+}
+.institution-master-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px
+}
+.institution-master-icon{
+  width:42px;height:42px;border-radius:13px;background:var(--brand-soft);
+  color:var(--brand-dark);display:grid;place-items:center;font-weight:950;font-size:11px
+}
+.institution-master-card h3{font-size:14px;margin:0 0 4px}
+.institution-master-card p{font-size:10px;color:var(--muted);margin:0}
+.institution-meta{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid #F0EBE5;
+  padding-top:12px;margin-top:12px
+}
+.institution-meta div{display:flex;flex-direction:column;gap:2px}
+.institution-meta span{font-size:8px;text-transform:uppercase;color:#9C9289;font-weight:850}
+.institution-meta strong{font-size:10px}
+.active-chip{
+  display:inline-flex;padding:4px 7px;border-radius:999px;background:#ECFDF3;
+  color:#027A48;font-size:8px;font-weight:900
+}
+.inactive-chip{
+  display:inline-flex;padding:4px 7px;border-radius:999px;background:#F2F4F7;
+  color:#667085;font-size:8px;font-weight:900
+}
+.user-management-note{
+  margin-bottom:14px;border:1px solid #F0D2A8;background:#FFF8EF;border-radius:14px;
+  padding:12px 14px;color:#6F563D;display:flex;flex-direction:column;gap:3px
+}
+.user-management-note strong{font-size:11px;color:#8E4B19}
+.user-management-note span{font-size:10px;line-height:1.5}
+.user-management-layout{
+  display:grid;grid-template-columns:minmax(330px,.75fr) minmax(0,1.7fr);gap:15px
+}
+.uid-cell{
+  max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px;color:#756A61
+}
+.role-chip{
+  display:inline-flex;padding:4px 7px;border-radius:999px;background:#FFF1DE;
+  color:#9A521B;font-size:8px;font-weight:900
+}
+@media(max-width:1100px){
+  .institution-master-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .user-management-layout{grid-template-columns:1fr}
+}
+@media(max-width:650px){
+  .institution-master-grid{grid-template-columns:1fr}
+}
