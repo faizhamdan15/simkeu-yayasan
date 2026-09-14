@@ -15,6 +15,12 @@ let incomeFundSources = [];
 let incomeRowsCache = [];
 let pendingIncomeSaveAction = "draft";
 
+let expenseInstitutions = [];
+let expenseAccounts = [];
+let expenseCategories = [];
+let expenseRowsCache = [];
+let pendingExpenseSaveAction = "draft";
+
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
 }).format(Number(n||0));
@@ -424,6 +430,322 @@ async function rejectIncome(id){
   toast("Transaksi pemasukan ditolak.");
 }
 
+
+/* =========================================================
+   MODUL PENGELUARAN + BUKTI TRANSAKSI
+   ========================================================= */
+
+async function loadExpenseModule(){
+  try{
+    $("expenseTransactionsBody").innerHTML=`<tr><td colspan="9" class="empty">Memuat...</td></tr>`;
+
+    const [instRes, accountRes, catRes] = await Promise.all([
+      sb.from("institutions").select("id,code,name,institution_type").eq("is_active",true).order("name"),
+      sb.from("accounts").select("id,institution_id,account_name,account_type,bank_name,is_active").eq("is_active",true).order("account_name"),
+      sb.from("expense_categories").select("id,code,name,is_active").eq("is_active",true).order("name")
+    ]);
+    [instRes,accountRes,catRes].forEach(r=>{if(r.error)throw r.error});
+
+    expenseInstitutions=instRes.data||[];
+    expenseAccounts=accountRes.data||[];
+    expenseCategories=catRes.data||[];
+
+    fillExpenseMasterOptions();
+    if(!$("expenseDate").value) $("expenseDate").value=todayISO();
+
+    await loadExpenseTransactions();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat modul pengeluaran: "+(err.message||"error"));
+  }
+}
+
+function fillExpenseMasterOptions(){
+  const instSelect=$("expenseInstitution");
+  const catSelect=$("expenseCategory");
+
+  instSelect.innerHTML=`<option value="">Pilih lembaga</option>`+
+    expenseInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+
+  catSelect.innerHTML=`<option value="">Pilih kategori</option>`+
+    expenseCategories.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+
+  if(!isCentralUser() && currentProfile?.institution_id){
+    instSelect.value=currentProfile.institution_id;
+    instSelect.disabled=true;
+    refreshExpenseAccountOptions();
+  }else{
+    instSelect.disabled=false;
+  }
+}
+
+function refreshExpenseAccountOptions(){
+  const institutionId=$("expenseInstitution").value;
+  const accountSelect=$("expenseSourceAccount");
+  const rows=expenseAccounts.filter(a=>a.institution_id===institutionId);
+
+  accountSelect.innerHTML=`<option value="">Pilih kas/bank sumber</option>`+
+    rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
+
+  accountSelect.disabled=!institutionId || !rows.length;
+}
+
+async function loadExpenseTransactions(){
+  const {data,error}=await sb.from("transactions")
+    .select(`
+      id,
+      transaction_number,
+      transaction_date,
+      amount,
+      description,
+      status,
+      created_at,
+      institution_id,
+      source_account_id,
+      expense_category_id,
+      institutions:institution_id(name),
+      expense_categories:expense_category_id(name),
+      accounts:source_account_id(account_name,account_type,bank_name),
+      transaction_attachments(id,file_name,file_path,file_type,uploaded_at)
+    `)
+    .eq("transaction_type","EXPENSE")
+    .order("transaction_date",{ascending:false})
+    .order("created_at",{ascending:false})
+    .limit(150);
+
+  if(error) throw error;
+  expenseRowsCache=data||[];
+  updateExpenseModuleStats();
+  renderExpenseRows();
+}
+
+function updateExpenseModuleStats(){
+  const r=monthRange();
+  const approvedMonth=expenseRowsCache
+    .filter(x=>x.status==="APPROVED" && x.transaction_date>=r.start && x.transaction_date<r.next)
+    .reduce((s,x)=>s+Number(x.amount||0),0);
+
+  $("expenseModuleApproved").textContent=rupiah(approvedMonth);
+  $("expenseDraftCount").textContent=expenseRowsCache.filter(x=>x.status==="DRAFT").length;
+  $("expenseSubmittedCount").textContent=expenseRowsCache.filter(x=>x.status==="SUBMITTED").length;
+}
+
+function renderExpenseRows(){
+  const term=($("expenseSearch").value||"").trim().toLowerCase();
+  const status=$("expenseStatusFilter").value;
+
+  const rows=expenseRowsCache.filter(x=>{
+    const hay=[
+      x.transaction_number,
+      x.description,
+      x.institutions?.name,
+      x.expense_categories?.name,
+      x.accounts?.account_name
+    ].filter(Boolean).join(" ").toLowerCase();
+    return (!term || hay.includes(term)) && (status==="ALL" || x.status===status);
+  });
+
+  $("expenseTransactionsBody").innerHTML=rows.length?rows.map(row=>{
+    const actions=[];
+    if(row.status==="DRAFT"){
+      actions.push(`<button class="table-action primary" data-expense-action="submit" data-id="${row.id}">Ajukan</button>`);
+    }
+    if(row.status==="SUBMITTED" && isCentralUser()){
+      actions.push(`<button class="table-action approve" data-expense-action="approve" data-id="${row.id}">Setujui</button>`);
+      actions.push(`<button class="table-action reject" data-expense-action="reject" data-id="${row.id}">Tolak</button>`);
+    }
+
+    const proofs=row.transaction_attachments||[];
+    const proofCell=proofs.length
+      ? `<button class="proof-btn" data-expense-action="proof" data-id="${row.id}">Lihat Bukti (${proofs.length})</button>`
+      : `<span class="proof-missing">Belum ada</span>`;
+
+    return `
+      <tr>
+        <td>${formatDate(row.transaction_date)}</td>
+        <td><strong>${escapeHtml(row.transaction_number||"-")}</strong><span class="account-sub description-cell" title="${escapeHtml(row.description||"")}">${escapeHtml(row.description||"")}</span></td>
+        <td>${escapeHtml(row.institutions?.name||"-")}</td>
+        <td>${escapeHtml(row.expense_categories?.name||"-")}</td>
+        <td>${escapeHtml(row.accounts?.account_name||"-")}</td>
+        <td><strong>${rupiah(row.amount)}</strong></td>
+        <td>${proofCell}</td>
+        <td><span class="pill ${statusClass(row.status)}">${escapeHtml(row.status)}</span></td>
+        <td><div class="action-group">${actions.join("") || `<span class="account-sub">—</span>`}</div></td>
+      </tr>`;
+  }).join(""):`<tr><td colspan="9" class="empty">Belum ada data pengeluaran sesuai filter.</td></tr>`;
+}
+
+function resetExpenseForm(){
+  $("expenseForm").reset();
+  $("expenseDate").value=todayISO();
+  $("expenseAmountPreview").textContent="Rp0";
+  $("expenseProofName").textContent="Belum ada file dipilih";
+
+  if(!isCentralUser() && currentProfile?.institution_id){
+    $("expenseInstitution").value=currentProfile.institution_id;
+    $("expenseInstitution").disabled=true;
+    refreshExpenseAccountOptions();
+  }else{
+    $("expenseInstitution").disabled=false;
+    $("expenseSourceAccount").innerHTML=`<option value="">Pilih kas/bank sumber</option>`;
+    $("expenseSourceAccount").disabled=true;
+  }
+}
+
+function safeFileName(name){
+  return String(name||"bukti")
+    .normalize("NFKD")
+    .replace(/[^\w.\-]+/g,"_")
+    .replace(/_+/g,"_")
+    .slice(-120);
+}
+
+async function uploadExpenseProof(transactionId,file){
+  if(!file) return null;
+  if(file.size>5*1024*1024) throw new Error("Ukuran bukti maksimal 5 MB.");
+
+  const allowed=["image/jpeg","image/png","image/webp","application/pdf"];
+  if(!allowed.includes(file.type)) throw new Error("Format bukti harus JPG, PNG, WEBP, atau PDF.");
+
+  const path=`${transactionId}/${Date.now()}_${safeFileName(file.name)}`;
+  const {error:uploadError}=await sb.storage
+    .from("transaction-proofs")
+    .upload(path,file,{cacheControl:"3600",upsert:false,contentType:file.type});
+
+  if(uploadError) throw uploadError;
+
+  const {error:metaError}=await sb.from("transaction_attachments").insert({
+    transaction_id:transactionId,
+    file_name:file.name,
+    file_path:path,
+    file_type:file.type,
+    uploaded_by:currentSession.user.id
+  });
+
+  if(metaError){
+    await sb.storage.from("transaction-proofs").remove([path]);
+    throw metaError;
+  }
+
+  return path;
+}
+
+async function saveExpense(action){
+  if(!currentSession?.user?.id) throw new Error("Sesi login tidak ditemukan.");
+
+  const institution_id=$("expenseInstitution").value;
+  const expense_category_id=$("expenseCategory").value;
+  const source_account_id=$("expenseSourceAccount").value;
+  const transaction_date=$("expenseDate").value;
+  const amount=Number($("expenseAmount").value);
+  const description=($("expenseDescription").value||"").trim();
+  const file=$("expenseProof").files?.[0]||null;
+
+  if(!transaction_date||!institution_id||!expense_category_id||!source_account_id||!amount||amount<=0){
+    throw new Error("Lengkapi tanggal, lembaga, kategori, akun sumber, dan nominal.");
+  }
+
+  if(action==="submit" && !file){
+    throw new Error("Bukti transaksi wajib diunggah sebelum pengeluaran diajukan.");
+  }
+
+  const selectedAccount=expenseAccounts.find(a=>a.id===source_account_id);
+  if(!selectedAccount || selectedAccount.institution_id!==institution_id){
+    throw new Error("Akun sumber tidak sesuai dengan lembaga yang dipilih.");
+  }
+
+  const payload={
+    transaction_type:"EXPENSE",
+    transaction_date,
+    institution_id,
+    fund_source_id:null,
+    expense_category_id,
+    source_account_id,
+    destination_account_id:null,
+    amount,
+    description:description||null,
+    status:"DRAFT",
+    created_by:currentSession.user.id
+  };
+
+  const {data,error}=await sb.from("transactions").insert(payload).select("id,transaction_number").single();
+  if(error) throw error;
+
+  try{
+    if(file) await uploadExpenseProof(data.id,file);
+
+    if(action==="submit"){
+      const {error:submitError}=await sb.rpc("submit_transaction",{p_transaction_id:data.id});
+      if(submitError) throw submitError;
+    }
+  }catch(err){
+    // Keep the draft transaction if proof/submission fails so there is an audit trail.
+    throw new Error(`${err.message || "Gagal memproses bukti/submit"}. Transaksi tersimpan sebagai Draft.`);
+  }
+
+  resetExpenseForm();
+  await Promise.all([loadExpenseTransactions(),loadDashboard()]);
+  toast(action==="submit" ? `Pengeluaran ${data.transaction_number} berhasil diajukan.` : `Pengeluaran ${data.transaction_number} disimpan sebagai Draft.`);
+}
+
+async function submitExistingExpense(id){
+  const row=expenseRowsCache.find(x=>x.id===id);
+  const proofs=row?.transaction_attachments||[];
+  if(!proofs.length){
+    throw new Error("Transaksi belum memiliki bukti. Unggah bukti melalui form transaksi baru atau lengkapi bukti sebelum diajukan.");
+  }
+  const {error}=await sb.rpc("submit_transaction",{p_transaction_id:id});
+  if(error) throw error;
+  await Promise.all([loadExpenseTransactions(),loadDashboard()]);
+  toast("Pengeluaran berhasil diajukan untuk approval.");
+}
+
+async function approveExpense(id){
+  const row=expenseRowsCache.find(x=>x.id===id);
+  if(!(row?.transaction_attachments||[]).length){
+    throw new Error("Tidak dapat menyetujui pengeluaran tanpa bukti transaksi.");
+  }
+  if(!confirm("Setujui pengeluaran ini? Setelah APPROVED, saldo akun akan berkurang.")) return;
+  const {error}=await sb.rpc("approve_transaction",{p_transaction_id:id,p_note:"Disetujui melalui SIMKEU"});
+  if(error) throw error;
+  await Promise.all([loadExpenseTransactions(),loadDashboard()]);
+  toast("Pengeluaran disetujui. Saldo sudah diperbarui.");
+}
+
+async function rejectExpense(id){
+  const note=prompt("Masukkan alasan penolakan:");
+  if(note===null) return;
+  if(!note.trim()){toast("Alasan penolakan wajib diisi.");return}
+  const {error}=await sb.rpc("reject_transaction",{p_transaction_id:id,p_note:note.trim()});
+  if(error) throw error;
+  await Promise.all([loadExpenseTransactions(),loadDashboard()]);
+  toast("Transaksi pengeluaran ditolak.");
+}
+
+async function viewExpenseProof(id){
+  const row=expenseRowsCache.find(x=>x.id===id);
+  const proofs=row?.transaction_attachments||[];
+  if(!proofs.length) throw new Error("Bukti transaksi tidak ditemukan.");
+
+  // Open first proof; if more than one, user can use repeated click after selecting in prompt
+  let chosen=proofs[0];
+  if(proofs.length>1){
+    const list=proofs.map((p,i)=>`${i+1}. ${p.file_name}`).join("\n");
+    const pick=prompt(`Pilih nomor bukti yang ingin dibuka:\n\n${list}`,"1");
+    if(pick===null) return;
+    const idx=Number(pick)-1;
+    if(!Number.isInteger(idx)||idx<0||idx>=proofs.length) throw new Error("Pilihan bukti tidak valid.");
+    chosen=proofs[idx];
+  }
+
+  const {data,error}=await sb.storage
+    .from("transaction-proofs")
+    .createSignedUrl(chosen.file_path,60);
+
+  if(error) throw error;
+  window.open(data.signedUrl,"_blank","noopener,noreferrer");
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -452,7 +774,9 @@ $("logoutBtn").addEventListener("click",async()=>{
 
 $("refreshBtn").addEventListener("click",async()=>{
   const incomeVisible=!$("incomeSection").classList.contains("hidden");
+  const expenseVisible=!$("expenseSection").classList.contains("hidden");
   if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
+  else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
   else await loadDashboard();
   toast("Data diperbarui.");
 });
@@ -476,10 +800,13 @@ async function switchView(v){
 
   $("dashboardSection").classList.toggle("hidden",v!=="dashboard");
   $("incomeSection").classList.toggle("hidden",v!=="pemasukan");
-  $("placeholderSection").classList.toggle("hidden",v==="dashboard"||v==="pemasukan");
+  $("expenseSection").classList.toggle("hidden",v!=="pengeluaran");
+  $("placeholderSection").classList.toggle("hidden",v==="dashboard"||v==="pemasukan"||v==="pengeluaran");
 
   if(v==="pemasukan"){
     await loadIncomeModule();
+  }else if(v==="pengeluaran"){
+    await loadExpenseModule();
   }else if(v!=="dashboard"){
     $("placeholderTitle").textContent=meta[v][0];
   }
@@ -538,6 +865,62 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
     if(action==="submit") await submitExistingIncome(id);
     if(action==="approve") await approveIncome(id);
     if(action==="reject") await rejectIncome(id);
+  }catch(err){
+    console.error(err);
+    toast("Aksi gagal: "+(err.message||"error"));
+  }finally{
+    btn.disabled=false;
+  }
+});
+
+
+/* Expense events */
+$("expenseInstitution").addEventListener("change",refreshExpenseAccountOptions);
+$("expenseAmount").addEventListener("input",()=>{
+  $("expenseAmountPreview").textContent=rupiah(Number($("expenseAmount").value||0));
+});
+$("expenseProof").addEventListener("change",()=>{
+  const f=$("expenseProof").files?.[0];
+  $("expenseProofName").textContent=f ? `${f.name} • ${(f.size/1024/1024).toFixed(2)} MB` : "Belum ada file dipilih";
+});
+$("expenseSearch").addEventListener("input",renderExpenseRows);
+$("expenseStatusFilter").addEventListener("change",renderExpenseRows);
+$("refreshExpenseBtn").addEventListener("click",async()=>{
+  await loadExpenseTransactions(); toast("Riwayat pengeluaran diperbarui.");
+});
+$("newExpenseBtn").addEventListener("click",()=>{
+  $("expenseFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+  setTimeout(()=>$("expenseDate").focus(),300);
+});
+
+$("saveExpenseDraftBtn").addEventListener("click",()=>{pendingExpenseSaveAction="draft"});
+$("saveExpenseSubmitBtn").addEventListener("click",()=>{pendingExpenseSaveAction="submit"});
+
+$("expenseForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const buttons=[$("saveExpenseDraftBtn"),$("saveExpenseSubmitBtn")];
+  buttons.forEach(b=>b.disabled=true);
+  try{
+    await saveExpense(pendingExpenseSaveAction);
+  }catch(err){
+    console.error(err);
+    toast("Gagal menyimpan pengeluaran: "+(err.message||"error"));
+  }finally{
+    buttons.forEach(b=>b.disabled=false);
+  }
+});
+
+$("expenseTransactionsBody").addEventListener("click",async e=>{
+  const btn=e.target.closest("[data-expense-action]");
+  if(!btn)return;
+  btn.disabled=true;
+  try{
+    const id=btn.dataset.id;
+    const action=btn.dataset.expenseAction;
+    if(action==="submit") await submitExistingExpense(id);
+    if(action==="approve") await approveExpense(id);
+    if(action==="reject") await rejectExpense(id);
+    if(action==="proof") await viewExpenseProof(id);
   }catch(err){
     console.error(err);
     toast("Aksi gagal: "+(err.message||"error"));

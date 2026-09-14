@@ -420,3 +420,29 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
   .income-filters{grid-template-columns:1fr}
   .form-actions{display:grid;grid-template-columns:1fr 1fr}
 }
+
+
+/* =========================================================
+   MODUL PENGELUARAN + BUKTI TRANSAKSI
+   ========================================================= */
+.proof-upload-box{
+  display:flex;align-items:center;gap:11px;padding:11px;border:1px dashed #D9C7B2;
+  border-radius:11px;background:#FFF9F1
+}
+.proof-upload-box input[type=file]{
+  width:145px;height:auto;border:none!important;padding:0!important;background:transparent;
+  box-shadow:none!important;font-size:10px
+}
+.proof-help{display:flex;flex-direction:column;gap:3px;min-width:0}
+.proof-help strong{font-size:10px;color:#5C4D3E}
+.proof-help small{font-size:9px;color:#8F8174;font-weight:500}
+.proof-name{
+  margin-top:5px;font-size:9px;color:var(--brand-dark);font-weight:800;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.proof-btn{
+  border:1px solid #E9C998;background:#FFF5E8;color:#985218;border-radius:8px;
+  height:29px;padding:0 8px;font-size:9px;font-weight:850
+}
+.proof-btn:hover{background:#FFE9CB}
+.proof-missing{font-size:9px;color:#A39B93}

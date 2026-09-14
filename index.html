@@ -323,6 +323,152 @@
           </div>
         </div>
 
+
+        <div id="expenseSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">MODUL KEUANGAN KELUAR</span>
+              <h1>Pengeluaran</h1>
+              <p>Catat pengeluaran lembaga, unggah bukti transaksi, lalu ajukan untuk persetujuan Yayasan.</p>
+            </div>
+            <button id="newExpenseBtn" class="brand-btn" type="button">+ Tambah Pengeluaran</button>
+          </div>
+
+          <div class="module-stats">
+            <article class="mini-stat">
+              <span>Pengeluaran Bulan Ini</span>
+              <strong id="expenseModuleApproved">Rp0</strong>
+              <small>Transaksi APPROVED</small>
+            </article>
+            <article class="mini-stat">
+              <span>Draft</span>
+              <strong id="expenseDraftCount">0</strong>
+              <small>Belum diajukan</small>
+            </article>
+            <article class="mini-stat">
+              <span>Menunggu Approval</span>
+              <strong id="expenseSubmittedCount">0</strong>
+              <small>Status SUBMITTED</small>
+            </article>
+          </div>
+
+          <div class="income-layout">
+            <article id="expenseFormCard" class="panel form-panel">
+              <div class="panel-title">
+                <h3>Input Pengeluaran</h3>
+                <p>Bukti nota/kuitansi dapat diunggah langsung dari HP.</p>
+              </div>
+
+              <form id="expenseForm" class="finance-form">
+                <div class="form-grid">
+                  <label class="form-field">
+                    <span>Tanggal Transaksi</span>
+                    <input id="expenseDate" type="date" required>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Lembaga</span>
+                    <select id="expenseInstitution" required>
+                      <option value="">Pilih lembaga</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Kategori Pengeluaran</span>
+                    <select id="expenseCategory" required>
+                      <option value="">Pilih kategori</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Akun Sumber</span>
+                    <select id="expenseSourceAccount" required disabled>
+                      <option value="">Pilih kas/bank sumber</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Nominal</span>
+                    <div class="money-input">
+                      <b>Rp</b>
+                      <input id="expenseAmount" type="number" min="1" step="1" placeholder="Contoh: 750000" required>
+                    </div>
+                    <small id="expenseAmountPreview">Rp0</small>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Keterangan</span>
+                    <textarea id="expenseDescription" rows="3" placeholder="Contoh: Pembelian ATK bulan September"></textarea>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Bukti Transaksi</span>
+                    <div class="proof-upload-box">
+                      <input id="expenseProof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" capture="environment">
+                      <div class="proof-help">
+                        <strong>Foto nota, kuitansi, invoice, atau PDF</strong>
+                        <small>Maksimal 5 MB. Bukti wajib jika transaksi langsung diajukan.</small>
+                      </div>
+                    </div>
+                    <div id="expenseProofName" class="proof-name">Belum ada file dipilih</div>
+                  </label>
+                </div>
+
+                <div class="form-note">
+                  <strong>Alur:</strong> Draft → Diajukan → Yayasan memeriksa bukti → APPROVED/REJECTED. Hanya transaksi APPROVED yang mengurangi saldo.
+                </div>
+
+                <div class="form-actions">
+                  <button id="saveExpenseDraftBtn" class="secondary-btn" type="submit" data-action="draft">Simpan Draft</button>
+                  <button id="saveExpenseSubmitBtn" class="brand-btn" type="submit" data-action="submit">Simpan & Ajukan</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel income-list-panel">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Riwayat Pengeluaran</h3>
+                  <p>Bukti transaksi tersimpan secara private di Supabase Storage.</p>
+                </div>
+                <button id="refreshExpenseBtn" class="outline-btn small-action" type="button">↻ Refresh</button>
+              </div>
+
+              <div class="income-filters">
+                <input id="expenseSearch" type="search" placeholder="Cari nomor/keterangan...">
+                <select id="expenseStatusFilter">
+                  <option value="ALL">Semua Status</option>
+                  <option value="DRAFT">DRAFT</option>
+                  <option value="SUBMITTED">SUBMITTED</option>
+                  <option value="APPROVED">APPROVED</option>
+                  <option value="REJECTED">REJECTED</option>
+                </select>
+              </div>
+
+              <div class="table-wrap">
+                <table class="income-table">
+                  <thead>
+                    <tr>
+                      <th>Tanggal</th>
+                      <th>No. Transaksi</th>
+                      <th>Lembaga</th>
+                      <th>Kategori</th>
+                      <th>Akun Sumber</th>
+                      <th>Nominal</th>
+                      <th>Bukti</th>
+                      <th>Status</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="expenseTransactionsBody">
+                    <tr><td colspan="9" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </div>
+
         <div id="placeholderSection" class="placeholder hidden">
           <div class="placeholder-card">
             <div class="big-icon">⚙</div>
