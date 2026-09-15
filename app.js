@@ -33,6 +33,9 @@ let editingTransferId = null;
 let reportInstitutions = [];
 let reportRowsCache = [];
 
+let lpjInstitutions = [];
+let lpjDataCache = null;
+
 let analyticsInstitutions = [];
 let analyticsRowsCache = [];
 let analyticsCashflowChart = null;
@@ -1720,6 +1723,711 @@ function printReport(){
     <div class="footer">Dicetak dari SIMKEU Yayasan Ar-Raudlah Kapedi • ${new Date().toLocaleString("id-ID")}</div>
     <script>window.onload=()=>{window.print();}<\/script>
     </body></html>`);
+  w.document.close();
+}
+
+
+
+/* =========================================================
+   LPJ BULANAN v6.9
+   ========================================================= */
+
+function lpjMonthBounds(year,month){
+  const start=`${year}-${String(month).padStart(2,"0")}-01`;
+  const nextDate=new Date(year,month,1);
+  const next=`${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,"0")}-01`;
+  const endDate=new Date(year,month,0);
+  const end=`${endDate.getFullYear()}-${String(endDate.getMonth()+1).padStart(2,"0")}-${String(endDate.getDate()).padStart(2,"0")}`;
+  return {start,next,end};
+}
+
+function lpjMonthName(month){
+  return MONTH_NAMES[Number(month)-1]||"-";
+}
+
+function lpjSignatureKey(institutionId){
+  return `simkeu_lpj_signatures_${institutionId||"default"}`;
+}
+
+function loadLPJSignatures(){
+  const institutionId=$("lpjInstitution").value;
+  let saved={};
+  try{
+    saved=JSON.parse(localStorage.getItem(lpjSignatureKey(institutionId))||"{}");
+  }catch(_){saved={}}
+
+  $("lpjTreasurerName").value=saved.treasurer||"";
+  $("lpjHeadName").value=saved.head||"";
+  $("lpjChairName").value=saved.chair||"";
+  $("lpjSignCity").value=saved.city||"Kapedi";
+}
+
+function saveLPJSignatures(){
+  const institutionId=$("lpjInstitution").value;
+  if(!institutionId){
+    toast("Pilih lembaga terlebih dahulu.");
+    return;
+  }
+
+  localStorage.setItem(lpjSignatureKey(institutionId),JSON.stringify({
+    treasurer:$("lpjTreasurerName").value.trim(),
+    head:$("lpjHeadName").value.trim(),
+    chair:$("lpjChairName").value.trim(),
+    city:$("lpjSignCity").value.trim()||"Kapedi"
+  }));
+  toast("Nama penandatangan LPJ disimpan di browser ini.");
+}
+
+async function loadLPJModule(){
+  try{
+    fillYearOptions("lpjYear",5,1);
+
+    const now=new Date();
+    if(!$("lpjMonth").dataset.initialized){
+      $("lpjMonth").value=String(now.getMonth()+1);
+      $("lpjYear").value=String(now.getFullYear());
+      $("lpjMonth").dataset.initialized="1";
+    }
+
+    if(!lpjInstitutions.length){
+      const {data,error}=await sb.from("institutions")
+        .select("id,code,name,institution_type,address,phone,is_active")
+        .eq("is_active",true)
+        .order("name");
+      if(error) throw error;
+      lpjInstitutions=data||[];
+    }
+
+    if(isCentralUser()){
+      $("lpjInstitution").innerHTML=`<option value="">Pilih lembaga</option>`+
+        lpjInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+      $("lpjInstitution").disabled=false;
+
+      if(!$("lpjInstitution").value && currentProfile?.institution_id){
+        $("lpjInstitution").value=currentProfile.institution_id;
+      }
+    }else{
+      restrictInstitutionSelector("lpjInstitution",lpjInstitutions);
+    }
+
+    loadLPJSignatures();
+
+    if($("lpjInstitution").value){
+      await fetchLPJData();
+    }else{
+      renderLPJEmpty();
+    }
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat LPJ: "+(err.message||"error"));
+  }
+}
+
+function renderLPJEmpty(){
+  lpjDataCache=null;
+  $("lpjOpeningBalance").textContent="Rp0";
+  $("lpjClosingBalance").textContent="Rp0";
+  $("lpjIncomeTotal").textContent="Rp0";
+  $("lpjExpenseTotal").textContent="Rp0";
+  $("lpjOpeningBreakdown").textContent="Cash Rp0 • Rekening Rp0";
+  $("lpjClosingBreakdown").textContent="Cash Rp0 • Rekening Rp0";
+  $("lpjIncomeCount").textContent="0 transaksi";
+  $("lpjExpenseCount").textContent="0 transaksi";
+  $("lpjTransferIn").textContent="Rp0";
+  $("lpjTransferOut").textContent="Rp0";
+  $("lpjInternalTransfer").textContent="Rp0";
+  $("lpjProofStatus").textContent="0 / 0";
+  $("lpjAccountBody").innerHTML=`<tr><td colspan="5" class="empty">Pilih periode dan lembaga.</td></tr>`;
+  $("lpjIncomeBody").innerHTML=`<tr><td colspan="6" class="empty">Belum ada data.</td></tr>`;
+  $("lpjExpenseBody").innerHTML=`<tr><td colspan="7" class="empty">Belum ada data.</td></tr>`;
+  $("lpjTransferBody").innerHTML=`<tr><td colspan="6" class="empty">Belum ada data.</td></tr>`;
+  $("lpjBudgetList").innerHTML=`<div class="empty">Belum ada data.</div>`;
+  $("lpjPeriodStatus").textContent="OPEN";
+  $("lpjPeriodStatus").className="period-chip open";
+  $("lpjConsistencyAlert").classList.add("hidden");
+}
+
+async function fetchLPJData(){
+  const institutionId=$("lpjInstitution").value;
+  const year=Number($("lpjYear").value);
+  const month=Number($("lpjMonth").value);
+
+  if(!institutionId){
+    renderLPJEmpty();
+    return;
+  }
+
+  const bounds=lpjMonthBounds(year,month);
+  const yearStart=`${year}-01-01`;
+
+  $("lpjAccountBody").innerHTML=`<tr><td colspan="5" class="empty">Menyusun LPJ...</td></tr>`;
+
+  const [accountsRes,trxRes,budgetRes,closureRes]=await Promise.all([
+    sb.from("accounts")
+      .select("id,institution_id,account_name,account_type,bank_name,account_number,opening_balance,is_active")
+      .eq("institution_id",institutionId)
+      .order("account_type")
+      .order("account_name"),
+
+    sb.from("transactions")
+      .select(`
+        id,
+        transaction_number,
+        transaction_date,
+        transaction_type,
+        institution_id,
+        fund_source_id,
+        expense_category_id,
+        source_account_id,
+        destination_account_id,
+        amount,
+        description,
+        status,
+        created_at,
+        fund_sources:fund_source_id(name),
+        expense_categories:expense_category_id(name),
+        source_account:source_account_id(id,account_name,account_type,institution_id),
+        destination_account:destination_account_id(id,account_name,account_type,institution_id),
+        transaction_attachments(id,file_name,file_path,file_type,uploaded_at)
+      `)
+      .eq("status","APPROVED")
+      .lte("transaction_date",bounds.end)
+      .order("transaction_date",{ascending:true})
+      .order("created_at",{ascending:true})
+      .limit(10000),
+
+    sb.from("budgets")
+      .select("id,fiscal_year,institution_id,expense_category_id,budget_amount,note,expense_categories:expense_category_id(name)")
+      .eq("institution_id",institutionId)
+      .eq("fiscal_year",year)
+      .order("budget_amount",{ascending:false}),
+
+    sb.from("period_closures")
+      .select("id,status,closed_at,note")
+      .eq("institution_id",institutionId)
+      .eq("fiscal_year",year)
+      .eq("period_month",month)
+      .eq("status","CLOSED")
+      .maybeSingle()
+  ]);
+
+  [accountsRes,trxRes,budgetRes,closureRes].forEach(r=>{if(r.error)throw r.error});
+
+  const institution=lpjInstitutions.find(i=>i.id===institutionId);
+  const accounts=accountsRes.data||[];
+  const allTransactions=trxRes.data||[];
+  const budgets=budgetRes.data||[];
+  const closure=closureRes.data||null;
+  const accountIds=new Set(accounts.map(a=>a.id));
+
+  // Hanya transaksi yang benar-benar menyentuh akun milik lembaga.
+  const relevant=allTransactions.filter(t=>
+    accountIds.has(t.source_account_id) ||
+    accountIds.has(t.destination_account_id) ||
+    (t.institution_id===institutionId && t.transaction_type!=="TRANSFER")
+  );
+
+  const openingByAccount=new Map(accounts.map(a=>[a.id,Number(a.opening_balance||0)]));
+  const closingByAccount=new Map(accounts.map(a=>[a.id,Number(a.opening_balance||0)]));
+
+  function applyMovement(map,t){
+    const amount=Number(t.amount||0);
+    if(t.transaction_type==="INCOME"){
+      if(map.has(t.destination_account_id)){
+        map.set(t.destination_account_id,map.get(t.destination_account_id)+amount);
+      }
+    }else if(t.transaction_type==="EXPENSE"){
+      if(map.has(t.source_account_id)){
+        map.set(t.source_account_id,map.get(t.source_account_id)-amount);
+      }
+    }else if(t.transaction_type==="TRANSFER"){
+      if(map.has(t.source_account_id)){
+        map.set(t.source_account_id,map.get(t.source_account_id)-amount);
+      }
+      if(map.has(t.destination_account_id)){
+        map.set(t.destination_account_id,map.get(t.destination_account_id)+amount);
+      }
+    }
+  }
+
+  relevant.forEach(t=>{
+    if(t.transaction_date<bounds.start) applyMovement(openingByAccount,t);
+    applyMovement(closingByAccount,t);
+  });
+
+  const periodTransactions=relevant.filter(t=>
+    t.transaction_date>=bounds.start &&
+    t.transaction_date<=bounds.end
+  );
+
+  const incomeRows=periodTransactions.filter(t=>
+    t.transaction_type==="INCOME" &&
+    accountIds.has(t.destination_account_id)
+  );
+
+  const expenseRows=periodTransactions.filter(t=>
+    t.transaction_type==="EXPENSE" &&
+    accountIds.has(t.source_account_id)
+  );
+
+  const transferRows=periodTransactions.filter(t=>t.transaction_type==="TRANSFER");
+
+  const transferInRows=transferRows.filter(t=>
+    !accountIds.has(t.source_account_id) &&
+    accountIds.has(t.destination_account_id)
+  );
+  const transferOutRows=transferRows.filter(t=>
+    accountIds.has(t.source_account_id) &&
+    !accountIds.has(t.destination_account_id)
+  );
+  const transferInternalRows=transferRows.filter(t=>
+    accountIds.has(t.source_account_id) &&
+    accountIds.has(t.destination_account_id)
+  );
+
+  const openingCash=accounts
+    .filter(a=>a.account_type==="CASH")
+    .reduce((s,a)=>s+Number(openingByAccount.get(a.id)||0),0);
+  const openingBank=accounts
+    .filter(a=>a.account_type==="BANK")
+    .reduce((s,a)=>s+Number(openingByAccount.get(a.id)||0),0);
+  const closingCash=accounts
+    .filter(a=>a.account_type==="CASH")
+    .reduce((s,a)=>s+Number(closingByAccount.get(a.id)||0),0);
+  const closingBank=accounts
+    .filter(a=>a.account_type==="BANK")
+    .reduce((s,a)=>s+Number(closingByAccount.get(a.id)||0),0);
+
+  const openingTotal=accounts.reduce((s,a)=>s+Number(openingByAccount.get(a.id)||0),0);
+  const closingTotal=accounts.reduce((s,a)=>s+Number(closingByAccount.get(a.id)||0),0);
+  const incomeTotal=incomeRows.reduce((s,t)=>s+Number(t.amount||0),0);
+  const expenseTotal=expenseRows.reduce((s,t)=>s+Number(t.amount||0),0);
+  const transferIn=transferInRows.reduce((s,t)=>s+Number(t.amount||0),0);
+  const transferOut=transferOutRows.reduce((s,t)=>s+Number(t.amount||0),0);
+  const internalTransfer=transferInternalRows.reduce((s,t)=>s+Number(t.amount||0),0);
+
+  const proofComplete=expenseRows.filter(t=>(t.transaction_attachments||[]).length>0).length;
+
+  const ytdExpenses=relevant.filter(t=>
+    t.transaction_type==="EXPENSE" &&
+    accountIds.has(t.source_account_id) &&
+    t.transaction_date>=yearStart &&
+    t.transaction_date<=bounds.end
+  );
+
+  const budgetRows=budgets.map(b=>{
+    const realization=ytdExpenses
+      .filter(t=>t.expense_category_id===b.expense_category_id)
+      .reduce((s,t)=>s+Number(t.amount||0),0);
+    const amount=Number(b.budget_amount||0);
+    return {
+      ...b,
+      realization,
+      remaining:amount-realization,
+      absorption:amount>0?realization/amount*100:(realization>0?999:0)
+    };
+  });
+
+  lpjDataCache={
+    institution,year,month,bounds,accounts,relevant,periodTransactions,
+    incomeRows,expenseRows,transferRows,transferInRows,transferOutRows,transferInternalRows,
+    openingByAccount,closingByAccount,
+    openingCash,openingBank,closingCash,closingBank,
+    openingTotal,closingTotal,incomeTotal,expenseTotal,transferIn,transferOut,internalTransfer,
+    proofComplete,budgetRows,closure
+  };
+
+  renderLPJ();
+}
+
+function lpjTransferClassification(t,accountIds){
+  const sourceOwn=accountIds.has(t.source_account_id);
+  const destOwn=accountIds.has(t.destination_account_id);
+
+  if(sourceOwn && destOwn) return {label:"Pemindahan Internal",cls:"internal"};
+  if(!sourceOwn && destOwn) return {label:"Transfer Masuk",cls:"in"};
+  if(sourceOwn && !destOwn) return {label:"Transfer Keluar",cls:"out"};
+  return {label:"Transfer",cls:""};
+}
+
+function renderLPJ(){
+  const d=lpjDataCache;
+  if(!d){renderLPJEmpty();return}
+
+  $("lpjOpeningBalance").textContent=rupiah(d.openingTotal);
+  $("lpjOpeningBreakdown").textContent=`Cash ${rupiah(d.openingCash)} • Rekening ${rupiah(d.openingBank)}`;
+  $("lpjClosingBalance").textContent=rupiah(d.closingTotal);
+  $("lpjClosingBreakdown").textContent=`Cash ${rupiah(d.closingCash)} • Rekening ${rupiah(d.closingBank)}`;
+  $("lpjIncomeTotal").textContent=rupiah(d.incomeTotal);
+  $("lpjIncomeCount").textContent=`${d.incomeRows.length} transaksi`;
+  $("lpjExpenseTotal").textContent=rupiah(d.expenseTotal);
+  $("lpjExpenseCount").textContent=`${d.expenseRows.length} transaksi`;
+
+  $("lpjTransferIn").textContent=rupiah(d.transferIn);
+  $("lpjTransferOut").textContent=rupiah(d.transferOut);
+  $("lpjInternalTransfer").textContent=rupiah(d.internalTransfer);
+  $("lpjProofStatus").textContent=`${d.proofComplete} / ${d.expenseRows.length}`;
+
+  if(d.closure){
+    $("lpjPeriodStatus").textContent="CLOSED";
+    $("lpjPeriodStatus").className="period-chip closed";
+  }else{
+    $("lpjPeriodStatus").textContent="OPEN";
+    $("lpjPeriodStatus").className="period-chip open";
+  }
+
+  const expected=d.openingTotal+d.incomeTotal-d.expenseTotal+d.transferIn-d.transferOut;
+  const difference=Math.round((d.closingTotal-expected)*100)/100;
+  $("lpjConsistencyAlert").classList.remove("hidden","ok","warn");
+
+  if(Math.abs(difference)<0.01){
+    $("lpjConsistencyAlert").classList.add("ok");
+    $("lpjConsistencyAlert").textContent=
+      `✓ Saldo konsisten: Saldo Awal + Pemasukan − Pengeluaran + Transfer Bersih = Saldo Akhir (${rupiah(d.closingTotal)}).`;
+  }else{
+    $("lpjConsistencyAlert").classList.add("warn");
+    $("lpjConsistencyAlert").textContent=
+      `⚠ Terdapat selisih ${rupiah(difference)} pada rekonsiliasi saldo. Periksa akun awal atau riwayat transaksi.`;
+  }
+
+  $("lpjAccountBody").innerHTML=d.accounts.length?d.accounts.map(a=>{
+    const opening=Number(d.openingByAccount.get(a.id)||0);
+    const closing=Number(d.closingByAccount.get(a.id)||0);
+    const movement=closing-opening;
+    return `<tr>
+      <td><strong>${escapeHtml(a.account_name)}</strong>${a.bank_name?`<span class="account-sub">${escapeHtml(a.bank_name)}</span>`:""}</td>
+      <td><span class="storage-chip ${storageTypeClass(a.account_type)}">${escapeHtml(storageTypeLabel(a.account_type))}</span></td>
+      <td>${rupiah(opening)}</td>
+      <td class="${movement>=0?"lpj-account-positive":"lpj-account-negative"}">${movement>=0?"+":""}${rupiah(movement)}</td>
+      <td><strong>${rupiah(closing)}</strong></td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="5" class="empty">Belum ada akun keuangan.</td></tr>`;
+
+  $("lpjIncomeBody").innerHTML=d.incomeRows.length?d.incomeRows.map(t=>`
+    <tr>
+      <td>${formatDate(t.transaction_date)}</td>
+      <td><strong>${escapeHtml(t.transaction_number||"-")}</strong></td>
+      <td>${escapeHtml(t.fund_sources?.name||"-")}</td>
+      <td><span class="storage-chip ${storageTypeClass(t.destination_account?.account_type)}">${escapeHtml(storageTypeLabel(t.destination_account?.account_type))}</span></td>
+      <td>${escapeHtml(t.description||"-")}</td>
+      <td><strong>${rupiah(t.amount)}</strong></td>
+    </tr>`).join(""):`<tr><td colspan="6" class="empty">Tidak ada pemasukan APPROVED pada periode ini.</td></tr>`;
+
+  $("lpjExpenseBody").innerHTML=d.expenseRows.length?d.expenseRows.map(t=>{
+    const proofs=t.transaction_attachments||[];
+    return `<tr>
+      <td>${formatDate(t.transaction_date)}</td>
+      <td><strong>${escapeHtml(t.transaction_number||"-")}</strong></td>
+      <td>${escapeHtml(t.expense_categories?.name||"-")}</td>
+      <td>${escapeHtml(t.source_account?.account_name||"-")}</td>
+      <td>${escapeHtml(t.description||"-")}</td>
+      <td><strong>${rupiah(t.amount)}</strong></td>
+      <td>${proofs.length
+        ? `<span class="lpj-proof-ok">Ada (${proofs.length})</span>`
+        : `<span class="lpj-proof-missing">Belum Ada</span>`}
+      </td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="7" class="empty">Tidak ada pengeluaran APPROVED pada periode ini.</td></tr>`;
+
+  const accountIds=new Set(d.accounts.map(a=>a.id));
+  $("lpjTransferBody").innerHTML=d.transferRows.length?d.transferRows.map(t=>{
+    const c=lpjTransferClassification(t,accountIds);
+    return `<tr>
+      <td>${formatDate(t.transaction_date)}</td>
+      <td><strong>${escapeHtml(t.transaction_number||"-")}</strong></td>
+      <td>${escapeHtml(t.source_account?.account_name||"-")}</td>
+      <td>${escapeHtml(t.destination_account?.account_name||"-")}</td>
+      <td><span class="lpj-transfer-type ${c.cls}">${c.label}</span></td>
+      <td><strong>${rupiah(t.amount)}</strong></td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="6" class="empty">Tidak ada transfer APPROVED pada periode ini.</td></tr>`;
+
+  $("lpjBudgetSubtitle").textContent=`Realisasi Januari–${lpjMonthName(d.month)} ${d.year}.`;
+  $("lpjBudgetList").innerHTML=d.budgetRows.length?d.budgetRows.map(b=>{
+    const cls=b.absorption>100?"over":b.absorption>=80?"warning":"";
+    const pct=b.absorption>=999?">999":(Math.round(b.absorption*10)/10).toLocaleString("id-ID");
+    return `<div class="lpj-budget-row ${cls}">
+      <div class="lpj-budget-top">
+        <strong>${escapeHtml(b.expense_categories?.name||"Kategori")}</strong>
+        <span>${pct}%</span>
+      </div>
+      <div class="lpj-budget-meta">
+        <span>Realisasi ${rupiah(b.realization)}</span>
+        <span>Anggaran ${rupiah(b.budget_amount)}</span>
+      </div>
+      <div class="lpj-budget-progress"><i style="width:${Math.min(100,b.absorption)}%"></i></div>
+    </div>`;
+  }).join(""):`<div class="empty">Belum ada anggaran ${d.year} untuk lembaga ini.</div>`;
+
+  $("lpjIncomeInfo").textContent=`${d.incomeRows.length} transaksi • ${lpjMonthName(d.month)} ${d.year}`;
+  $("lpjExpenseInfo").textContent=
+    `${d.expenseRows.length} transaksi • ${d.proofComplete} memiliki bukti • ${d.expenseRows.length-d.proofComplete} belum memiliki bukti`;
+}
+
+function lpjPrintTableRows(rows,type){
+  if(!rows.length){
+    const cols=type==="expense"?7:type==="income"?6:6;
+    return `<tr><td colspan="${cols}" class="empty-print">Tidak ada transaksi.</td></tr>`;
+  }
+
+  if(type==="income"){
+    return rows.map(t=>`
+      <tr>
+        <td>${formatDate(t.transaction_date)}</td>
+        <td>${escapeHtml(t.transaction_number||"-")}</td>
+        <td>${escapeHtml(t.fund_sources?.name||"-")}</td>
+        <td>${escapeHtml(storageTypeLabel(t.destination_account?.account_type))}</td>
+        <td>${escapeHtml(t.description||"-")}</td>
+        <td class="num">${rupiah(t.amount)}</td>
+      </tr>`).join("");
+  }
+
+  if(type==="expense"){
+    return rows.map(t=>{
+      const proofs=t.transaction_attachments||[];
+      return `<tr>
+        <td>${formatDate(t.transaction_date)}</td>
+        <td>${escapeHtml(t.transaction_number||"-")}</td>
+        <td>${escapeHtml(t.expense_categories?.name||"-")}</td>
+        <td>${escapeHtml(t.source_account?.account_name||"-")}</td>
+        <td>${escapeHtml(t.description||"-")}</td>
+        <td class="num">${rupiah(t.amount)}</td>
+        <td>${proofs.length?`Ada (${proofs.length})`:"Belum Ada"}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  const ids=new Set(lpjDataCache.accounts.map(a=>a.id));
+  return rows.map(t=>{
+    const c=lpjTransferClassification(t,ids);
+    return `<tr>
+      <td>${formatDate(t.transaction_date)}</td>
+      <td>${escapeHtml(t.transaction_number||"-")}</td>
+      <td>${escapeHtml(t.source_account?.account_name||"-")}</td>
+      <td>${escapeHtml(t.destination_account?.account_name||"-")}</td>
+      <td>${escapeHtml(c.label)}</td>
+      <td class="num">${rupiah(t.amount)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function printLPJ(){
+  const d=lpjDataCache;
+  if(!d){
+    toast("Pilih lembaga dan muat LPJ terlebih dahulu.");
+    return;
+  }
+
+  const treasurer=$("lpjTreasurerName").value.trim()||"(................................)";
+  const head=$("lpjHeadName").value.trim()||"(................................)";
+  const chair=$("lpjChairName").value.trim()||"(................................)";
+  const city=$("lpjSignCity").value.trim()||"Kapedi";
+  const monthName=lpjMonthName(d.month);
+  const logoUrl=new URL("logo-yayasan.jpeg",window.location.href).href;
+
+  const accountRows=d.accounts.map(a=>{
+    const opening=Number(d.openingByAccount.get(a.id)||0);
+    const closing=Number(d.closingByAccount.get(a.id)||0);
+    return `<tr>
+      <td>${escapeHtml(a.account_name)}</td>
+      <td>${escapeHtml(storageTypeLabel(a.account_type))}</td>
+      <td class="num">${rupiah(opening)}</td>
+      <td class="num">${rupiah(closing-opening)}</td>
+      <td class="num">${rupiah(closing)}</td>
+    </tr>`;
+  }).join("");
+
+  const budgetRows=d.budgetRows.length?d.budgetRows.map(b=>{
+    const pct=b.absorption>=999?">999":(Math.round(b.absorption*10)/10).toLocaleString("id-ID");
+    return `<tr>
+      <td>${escapeHtml(b.expense_categories?.name||"-")}</td>
+      <td class="num">${rupiah(b.budget_amount)}</td>
+      <td class="num">${rupiah(b.realization)}</td>
+      <td class="num">${rupiah(b.remaining)}</td>
+      <td class="num">${pct}%</td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="5" class="empty-print">Belum ada anggaran.</td></tr>`;
+
+  const proofList=d.expenseRows.flatMap(t=>
+    (t.transaction_attachments||[]).map(p=>({
+      transaction_number:t.transaction_number,
+      date:t.transaction_date,
+      file_name:p.file_name
+    }))
+  );
+
+  const proofRows=proofList.length?proofList.map((p,i)=>`
+    <tr>
+      <td>${i+1}</td>
+      <td>${formatDate(p.date)}</td>
+      <td>${escapeHtml(p.transaction_number||"-")}</td>
+      <td>${escapeHtml(p.file_name||"-")}</td>
+    </tr>`).join(""):`<tr><td colspan="4" class="empty-print">Tidak ada lampiran bukti.</td></tr>`;
+
+  const closureText=d.closure
+    ? `CLOSED • Ditutup ${auditLocalDateTime(d.closure.closed_at)}`
+    : "OPEN";
+
+  const signDate=new Intl.DateTimeFormat("id-ID",{
+    day:"2-digit",month:"long",year:"numeric"
+  }).format(new Date());
+
+  const w=window.open("","_blank","width=1200,height=900");
+  if(!w){
+    toast("Browser memblokir jendela cetak. Izinkan pop-up untuk situs ini.");
+    return;
+  }
+
+  w.document.write(`<!doctype html>
+  <html>
+  <head>
+    <meta charset="utf-8">
+    <title>LPJ ${escapeHtml(d.institution?.name||"Lembaga")} - ${monthName} ${d.year}</title>
+    <style>
+      @page{size:A4 portrait;margin:14mm 12mm 15mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;font-size:9.3px;line-height:1.35}
+      .letterhead{display:grid;grid-template-columns:72px 1fr 72px;align-items:center;border-bottom:3px double #111;padding-bottom:8px;margin-bottom:12px}
+      .logo{width:64px;height:64px;object-fit:contain}
+      .letterhead-center{text-align:center}
+      .letterhead-center h2{font-size:14px;margin:0 0 2px;letter-spacing:.3px}
+      .letterhead-center h1{font-size:17px;margin:0 0 2px}
+      .letterhead-center p{font-size:9px;margin:2px 0}
+      .doc-title{text-align:center;margin:14px 0 10px}
+      .doc-title h2{font-size:14px;margin:0;text-decoration:underline}
+      .doc-title p{margin:3px 0 0}
+      .meta{width:100%;margin:0 0 10px}
+      .meta td{padding:2px 3px;border:0}
+      .meta td:first-child{width:115px}
+      .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0}
+      .sum{border:1px solid #999;padding:7px}
+      .sum span{display:block;font-size:7.5px;color:#555}
+      .sum strong{display:block;font-size:11px;margin-top:2px}
+      .subsummary{border:1px solid #bbb;background:#fafafa;padding:6px 8px;margin-bottom:10px}
+      .section-title{font-size:10px;font-weight:bold;margin:12px 0 5px;padding:4px 6px;background:#eee;border-left:4px solid #F89921}
+      table{width:100%;border-collapse:collapse}
+      th,td{border:1px solid #999;padding:4px 5px;vertical-align:top}
+      th{background:#eee;font-size:8px}
+      .num{text-align:right;white-space:nowrap}
+      .empty-print{text-align:center;color:#777;padding:8px}
+      .totals td{font-weight:bold}
+      .proof-note{margin-top:4px;color:#555;font-size:8px}
+      .signature-place{text-align:right;margin-top:16px;margin-bottom:4px}
+      .signatures{display:grid;grid-template-columns:repeat(3,1fr);gap:25px;text-align:center;page-break-inside:avoid}
+      .sig-role{font-weight:bold;min-height:30px}
+      .sig-space{height:58px}
+      .sig-name{font-weight:bold;text-decoration:underline}
+      .footer-note{margin-top:14px;font-size:7.5px;color:#666;border-top:1px solid #ccc;padding-top:5px}
+      .page-break{page-break-before:always}
+      @media print{
+        .no-print{display:none!important}
+        tr,td,th{page-break-inside:avoid}
+      }
+    </style>
+  </head>
+  <body>
+    <div class="letterhead">
+      <img class="logo" src="${logoUrl}">
+      <div class="letterhead-center">
+        <h2>YAYASAN AR-RAUDLAH KAPEDI</h2>
+        <h1>${escapeHtml((d.institution?.name||"LEMBAGA").toUpperCase())}</h1>
+        <p>${escapeHtml(d.institution?.address||"Kapedi, Bluto, Sumenep")}</p>
+      </div>
+      <div></div>
+    </div>
+
+    <div class="doc-title">
+      <h2>LAPORAN PERTANGGUNGJAWABAN KEUANGAN (LPJ)</h2>
+      <p>Periode ${monthName} ${d.year}</p>
+    </div>
+
+    <table class="meta">
+      <tr><td>Nama Lembaga</td><td>: <strong>${escapeHtml(d.institution?.name||"-")}</strong></td></tr>
+      <tr><td>Periode</td><td>: ${monthName} ${d.year}</td></tr>
+      <tr><td>Status Periode</td><td>: ${escapeHtml(closureText)}</td></tr>
+      <tr><td>Tanggal Cetak</td><td>: ${escapeHtml(signDate)}</td></tr>
+    </table>
+
+    <div class="summary">
+      <div class="sum"><span>Saldo Awal</span><strong>${rupiah(d.openingTotal)}</strong></div>
+      <div class="sum"><span>Pemasukan</span><strong>${rupiah(d.incomeTotal)}</strong></div>
+      <div class="sum"><span>Pengeluaran</span><strong>${rupiah(d.expenseTotal)}</strong></div>
+      <div class="sum"><span>Saldo Akhir</span><strong>${rupiah(d.closingTotal)}</strong></div>
+    </div>
+    <div class="subsummary">
+      Saldo Awal: Cash ${rupiah(d.openingCash)} • Rekening ${rupiah(d.openingBank)} &nbsp; | &nbsp;
+      Saldo Akhir: Cash ${rupiah(d.closingCash)} • Rekening ${rupiah(d.closingBank)} &nbsp; | &nbsp;
+      Transfer Masuk ${rupiah(d.transferIn)} • Transfer Keluar ${rupiah(d.transferOut)}
+    </div>
+
+    <div class="section-title">A. POSISI SALDO PER AKUN</div>
+    <table>
+      <thead><tr><th>Akun</th><th>Jenis</th><th>Saldo Awal</th><th>Mutasi</th><th>Saldo Akhir</th></tr></thead>
+      <tbody>${accountRows||`<tr><td colspan="5" class="empty-print">Belum ada akun.</td></tr>`}</tbody>
+      <tfoot><tr class="totals"><td colspan="2">TOTAL</td><td class="num">${rupiah(d.openingTotal)}</td><td class="num">${rupiah(d.closingTotal-d.openingTotal)}</td><td class="num">${rupiah(d.closingTotal)}</td></tr></tfoot>
+    </table>
+
+    <div class="section-title">B. RINCIAN PEMASUKAN</div>
+    <table>
+      <thead><tr><th>Tanggal</th><th>No. Transaksi</th><th>Sumber Dana</th><th>Penyimpanan</th><th>Keterangan</th><th>Nominal</th></tr></thead>
+      <tbody>${lpjPrintTableRows(d.incomeRows,"income")}</tbody>
+      <tfoot><tr class="totals"><td colspan="5">TOTAL PEMASUKAN</td><td class="num">${rupiah(d.incomeTotal)}</td></tr></tfoot>
+    </table>
+
+    <div class="section-title">C. RINCIAN PENGELUARAN</div>
+    <table>
+      <thead><tr><th>Tanggal</th><th>No. Transaksi</th><th>Kategori</th><th>Akun</th><th>Keterangan</th><th>Nominal</th><th>Bukti</th></tr></thead>
+      <tbody>${lpjPrintTableRows(d.expenseRows,"expense")}</tbody>
+      <tfoot><tr class="totals"><td colspan="5">TOTAL PENGELUARAN</td><td class="num">${rupiah(d.expenseTotal)}</td><td>${d.proofComplete}/${d.expenseRows.length}</td></tr></tfoot>
+    </table>
+
+    <div class="section-title">D. TRANSFER INTERNAL</div>
+    <table>
+      <thead><tr><th>Tanggal</th><th>No. Transaksi</th><th>Dari</th><th>Ke</th><th>Klasifikasi</th><th>Nominal</th></tr></thead>
+      <tbody>${lpjPrintTableRows(d.transferRows,"transfer")}</tbody>
+    </table>
+
+    <div class="section-title">E. ANGGARAN & REALISASI s.d. ${monthName.toUpperCase()} ${d.year}</div>
+    <table>
+      <thead><tr><th>Kategori</th><th>Anggaran Tahunan</th><th>Realisasi YTD</th><th>Sisa</th><th>Serapan</th></tr></thead>
+      <tbody>${budgetRows}</tbody>
+    </table>
+
+    <div class="section-title">F. DAFTAR LAMPIRAN BUKTI TRANSAKSI</div>
+    <table>
+      <thead><tr><th>No</th><th>Tanggal</th><th>No. Transaksi</th><th>Nama File Bukti</th></tr></thead>
+      <tbody>${proofRows}</tbody>
+    </table>
+    <div class="proof-note">Kelengkapan bukti pengeluaran: ${d.proofComplete} dari ${d.expenseRows.length} transaksi pengeluaran.</div>
+
+    <div class="signature-place">${escapeHtml(city)}, ${escapeHtml(signDate)}</div>
+    <div class="signatures">
+      <div>
+        <div class="sig-role">${d.institution?.institution_type==="FOUNDATION"?"Bendahara Yayasan":"Bendahara / Penyusun"}</div>
+        <div class="sig-space"></div>
+        <div class="sig-name">${escapeHtml(treasurer)}</div>
+      </div>
+      <div>
+        <div class="sig-role">${d.institution?.institution_type==="FOUNDATION"?"Sekretaris Yayasan":"Kepala Lembaga"}</div>
+        <div class="sig-space"></div>
+        <div class="sig-name">${escapeHtml(head)}</div>
+      </div>
+      <div>
+        <div class="sig-role">Ketua Yayasan</div>
+        <div class="sig-space"></div>
+        <div class="sig-name">${escapeHtml(chair)}</div>
+      </div>
+    </div>
+
+    <div class="footer-note">
+      Dokumen ini dihasilkan dari SIMKEU Yayasan Ar-Raudlah Kapedi. Transaksi yang dihitung dalam LPJ adalah transaksi berstatus APPROVED; transaksi VOID tidak memengaruhi saldo.
+    </div>
+    <script>
+      window.onload=()=>setTimeout(()=>window.print(),350);
+    <\/script>
+  </body>
+  </html>`);
+
   w.document.close();
 }
 
@@ -3802,6 +4510,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   const transferVisible=!$("transferSection").classList.contains("hidden");
   const evidenceVisible=!$("evidenceSection").classList.contains("hidden");
   const reportVisible=!$("reportSection").classList.contains("hidden");
+  const lpjVisible=!$("lpjSection").classList.contains("hidden");
   const analyticsVisible=!$("analyticsSection").classList.contains("hidden");
   const auditVisible=!$("auditSection").classList.contains("hidden");
   const budgetVisible=!$("budgetSection").classList.contains("hidden");
@@ -3813,6 +4522,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   else if(transferVisible) await Promise.all([loadDashboard(),loadTransferModule()]);
   else if(evidenceVisible) await Promise.all([loadDashboard(),fetchEvidenceTransactions()]);
   else if(reportVisible) await Promise.all([loadDashboard(),fetchReportTransactions()]);
+  else if(lpjVisible) await Promise.all([loadDashboard(),fetchLPJData()]);
   else if(analyticsVisible) await Promise.all([loadDashboard(),fetchAnalyticsData()]);
   else if(auditVisible) await Promise.all([loadDashboard(),fetchAuditLogs()]);
   else if(budgetVisible) await Promise.all([loadDashboard(),fetchBudgetRealization()]);
@@ -3831,6 +4541,7 @@ const meta={
   bukti:["Bukti Transaksi","Dokumentasi nota, kuitansi, dan invoice"],
   lembaga:["Lembaga","Kelola unit di bawah Yayasan"],
   laporan:["Laporan","Rekap keuangan dan ekspor"],
+  lpj:["LPJ Bulanan","Pertanggungjawaban keuangan per bulan dan lembaga"],
   analitik:["Analitik","Diagram, tren, dan persentase"],
   pengguna:["Pengguna","Kelola akun dan hak akses"],
   audit:["Audit Trail","Riwayat aktivitas dan perubahan sistem"],
@@ -3865,6 +4576,7 @@ async function switchView(v){
   $("transferSection").classList.toggle("hidden",v!=="transfer");
   $("evidenceSection").classList.toggle("hidden",v!=="bukti");
   $("reportSection").classList.toggle("hidden",v!=="laporan");
+  $("lpjSection").classList.toggle("hidden",v!=="lpj");
   $("analyticsSection").classList.toggle("hidden",v!=="analitik");
   $("institutionsSection").classList.toggle("hidden",v!=="lembaga");
   $("usersSection").classList.toggle("hidden",v!=="pengguna");
@@ -3874,7 +4586,7 @@ async function switchView(v){
   $("executiveSection").classList.toggle("hidden",v!=="eksekutif");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","lpj","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -3887,6 +4599,8 @@ async function switchView(v){
     await loadEvidenceModule();
   }else if(v==="laporan"){
     await loadReportModule();
+  }else if(v==="lpj"){
+    await loadLPJModule();
   }else if(v==="analitik"){
     await loadAnalyticsModule();
   }else if(v==="lembaga"){
@@ -4196,6 +4910,29 @@ $("reportType").addEventListener("change",renderReportRows);
 $("reportStatus").addEventListener("change",renderReportRows);
 $("exportReportCsvBtn").addEventListener("click",exportReportCsv);
 $("printReportBtn").addEventListener("click",printReport);
+
+/* LPJ events */
+$("lpjMonth").addEventListener("change",async()=>{
+  try{await fetchLPJData()}catch(err){console.error(err);toast("Gagal memuat LPJ: "+(err.message||"error"))}
+});
+$("lpjYear").addEventListener("change",async()=>{
+  try{await fetchLPJData()}catch(err){console.error(err);toast("Gagal memuat LPJ: "+(err.message||"error"))}
+});
+$("lpjInstitution").addEventListener("change",async()=>{
+  loadLPJSignatures();
+  try{await fetchLPJData()}catch(err){console.error(err);toast("Gagal memuat LPJ: "+(err.message||"error"))}
+});
+$("refreshLPJBtn").addEventListener("click",async()=>{
+  try{
+    await fetchLPJData();
+    toast("LPJ berhasil diperbarui.");
+  }catch(err){
+    console.error(err);
+    toast("Gagal memperbarui LPJ: "+(err.message||"error"));
+  }
+});
+$("printLPJBtn").addEventListener("click",printLPJ);
+$("saveLPJSignaturesBtn").addEventListener("click",saveLPJSignatures);
 
 /* Analytics events */
 $("analyticsYear").addEventListener("change",async()=>{

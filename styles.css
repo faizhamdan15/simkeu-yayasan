@@ -1339,3 +1339,216 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
   cursor:not-allowed;
   background:#F3F1EE;
 }
+
+
+/* =========================================================
+   LPJ BULANAN v6.9
+   ========================================================= */
+.lpj-filter-panel{margin-bottom:14px}
+.lpj-filter-grid{
+  display:grid;
+  grid-template-columns:170px 150px minmax(240px,1fr) 170px;
+  gap:10px;
+  align-items:end;
+}
+.lpj-period-status{
+  min-height:67px;
+  padding:10px 12px;
+  border:1px solid #E8E0D8;
+  border-radius:11px;
+  background:#FBF9F6;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:7px;
+}
+.lpj-period-status>span{
+  font-size:8px;
+  text-transform:uppercase;
+  font-weight:900;
+  color:#978C82;
+}
+.lpj-period-status .period-chip{width:max-content}
+
+.lpj-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+  margin-bottom:12px;
+}
+.lpj-summary-card{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:15px;
+  padding:14px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  position:relative;
+  overflow:hidden;
+}
+.lpj-summary-card::before{
+  content:"";
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:4px;
+  background:#8C8075;
+}
+.lpj-summary-card.income::before{background:#2F855A}
+.lpj-summary-card.expense::before{background:#B44135}
+.lpj-summary-card span{font-size:9px;color:#887D73;font-weight:750}
+.lpj-summary-card strong{font-size:17px;color:#27211C}
+.lpj-summary-card small{font-size:8px;color:#A1978E;line-height:1.4}
+
+.lpj-secondary-summary{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  border:1px solid #E9E1D9;
+  background:#FBF9F6;
+  border-radius:13px;
+  margin-bottom:14px;
+  overflow:hidden;
+}
+.lpj-secondary-summary div{
+  padding:11px 13px;
+  border-right:1px solid #E9E1D9;
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.lpj-secondary-summary div:last-child{border-right:0}
+.lpj-secondary-summary span{font-size:8px;color:#8E837A}
+.lpj-secondary-summary strong{font-size:11px;color:#373029}
+
+.lpj-consistency{
+  margin-bottom:14px;
+  padding:10px 13px;
+  border-radius:11px;
+  font-size:9px;
+  font-weight:800;
+  line-height:1.5;
+}
+.lpj-consistency.ok{
+  background:#EDF8F1;
+  color:#247047;
+  border:1px solid #CDE7D6;
+}
+.lpj-consistency.warn{
+  background:#FFF2EF;
+  color:#A33C31;
+  border:1px solid #F0C9C3;
+}
+
+.lpj-grid{
+  display:grid;
+  grid-template-columns:minmax(0,1.45fr) minmax(290px,.65fr);
+  gap:14px;
+  margin-bottom:14px;
+}
+.lpj-account-table{min-width:650px}
+.lpj-account-positive{color:#267248}
+.lpj-account-negative{color:#AB3E33}
+
+.lpj-budget-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  max-height:360px;
+  overflow:auto;
+}
+.lpj-budget-row{
+  border:1px solid #EEE7DF;
+  background:#FCFAF8;
+  border-radius:10px;
+  padding:9px 10px;
+}
+.lpj-budget-top{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:5px;
+}
+.lpj-budget-top strong{font-size:9px;color:#3D352E}
+.lpj-budget-top span{font-size:8px;font-weight:900;color:#9B571E}
+.lpj-budget-meta{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  color:#8F847A;
+  font-size:7.5px;
+  margin-bottom:6px;
+}
+.lpj-budget-progress{
+  height:5px;
+  border-radius:999px;
+  background:#ECE8E3;
+  overflow:hidden;
+}
+.lpj-budget-progress i{
+  display:block;
+  height:100%;
+  border-radius:999px;
+  background:#2F855A;
+}
+.lpj-budget-row.warning .lpj-budget-progress i{background:#F89921}
+.lpj-budget-row.over .lpj-budget-progress i{background:#C0392B}
+
+.lpj-detail-panel{margin-bottom:14px}
+.lpj-detail-table{min-width:900px}
+.lpj-proof-ok{
+  display:inline-flex;
+  padding:4px 7px;
+  border-radius:999px;
+  background:#EAF7EF;
+  color:#247147;
+  font-size:8px;
+  font-weight:900;
+}
+.lpj-proof-missing{
+  display:inline-flex;
+  padding:4px 7px;
+  border-radius:999px;
+  background:#FFF0EE;
+  color:#A43A2F;
+  font-size:8px;
+  font-weight:900;
+}
+.lpj-transfer-type{
+  display:inline-flex;
+  padding:4px 7px;
+  border-radius:999px;
+  background:#F2F1EF;
+  color:#665E57;
+  font-size:8px;
+  font-weight:900;
+}
+.lpj-transfer-type.in{background:#EAF7EF;color:#247147}
+.lpj-transfer-type.out{background:#FFF0EE;color:#A43A2F}
+.lpj-transfer-type.internal{background:#EDF4FF;color:#315FA8}
+
+.lpj-signature-panel{margin-bottom:14px}
+.lpj-signature-form{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;
+}
+
+@media(max-width:1150px){
+  .lpj-filter-grid{grid-template-columns:1fr 1fr}
+  .lpj-grid{grid-template-columns:1fr}
+  .lpj-signature-form{grid-template-columns:1fr 1fr}
+}
+@media(max-width:800px){
+  .lpj-summary-grid{grid-template-columns:1fr 1fr}
+  .lpj-secondary-summary{grid-template-columns:1fr 1fr}
+  .lpj-secondary-summary div:nth-child(2){border-right:0}
+  .lpj-secondary-summary div:nth-child(-n+2){border-bottom:1px solid #E9E1D9}
+}
+@media(max-width:560px){
+  .lpj-filter-grid,
+  .lpj-summary-grid,
+  .lpj-secondary-summary,
+  .lpj-signature-form{grid-template-columns:1fr}
+  .lpj-secondary-summary div{border-right:0;border-bottom:1px solid #E9E1D9}
+  .lpj-secondary-summary div:last-child{border-bottom:0}
+}
