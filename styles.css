@@ -114,7 +114,11 @@ button{cursor:pointer}
   position:fixed;inset:0 auto 0 0;width:258px;
   background:linear-gradient(180deg,#151515,#0D0D0D 72%,#090909);
   color:#fff;padding:20px 15px;display:flex;flex-direction:column;z-index:40;
-  box-shadow:8px 0 30px rgba(0,0,0,.06)
+  box-shadow:8px 0 30px rgba(0,0,0,.06);
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(248,153,33,.45) transparent;
 }
 .sidebar-head{gap:11px;padding:0 6px 20px;border-bottom:1px solid rgba(255,255,255,.09)}
 .sidebar-logo{
@@ -619,4 +623,16 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
 }
 @media(max-width:650px){
   .institution-master-grid{grid-template-columns:1fr}
+}
+
+.sidebar::-webkit-scrollbar{width:6px}
+.sidebar::-webkit-scrollbar-track{background:transparent}
+.sidebar::-webkit-scrollbar-thumb{
+  background:rgba(248,153,33,.35);
+  border-radius:999px;
+}
+.sidebar-bottom{
+  flex-shrink:0;
+  padding-top:12px;
+  padding-bottom:6px;
 }
