@@ -154,6 +154,33 @@
             </article>
           </div>
 
+          <div class="balance-composition">
+            <article class="balance-composition-card cash-card">
+              <div class="balance-composition-icon">💵</div>
+              <div>
+                <span>Uang Cash / Tunai</span>
+                <strong id="totalCashBalance">Rp0</strong>
+                <small>Saldo pada akun bertipe CASH</small>
+              </div>
+            </article>
+            <article class="balance-composition-card bank-card">
+              <div class="balance-composition-icon">🏦</div>
+              <div>
+                <span>Saldo Rekening</span>
+                <strong id="totalBankBalance">Rp0</strong>
+                <small>Saldo pada akun bertipe BANK</small>
+              </div>
+            </article>
+            <article class="balance-composition-card ledger-card">
+              <div class="balance-composition-icon">Σ</div>
+              <div>
+                <span>Total Buku Besar</span>
+                <strong id="ledgerGrandBalance">Rp0</strong>
+                <small>Cash + Rekening = satu kesatuan saldo</small>
+              </div>
+            </article>
+          </div>
+
           <div class="grid two">
             <article class="panel wide">
               <div class="panel-title"><h3>Arus Kas Bulanan</h3><p>Pemasukan vs pengeluaran tahun berjalan</p></div>
@@ -205,11 +232,21 @@
             <button id="newIncomeBtn" class="brand-btn" type="button">+ Tambah Pemasukan</button>
           </div>
 
-          <div class="module-stats">
+          <div class="module-stats income-storage-stats">
             <article class="mini-stat">
               <span>Pemasukan Bulan Ini</span>
               <strong id="incomeModuleApproved">Rp0</strong>
-              <small>Transaksi APPROVED</small>
+              <small>Total Cash + Rekening</small>
+            </article>
+            <article class="mini-stat storage-cash-stat">
+              <span>Masuk ke Cash</span>
+              <strong id="incomeCashApproved">Rp0</strong>
+              <small>APPROVED bulan ini</small>
+            </article>
+            <article class="mini-stat storage-bank-stat">
+              <span>Masuk ke Rekening</span>
+              <strong id="incomeBankApproved">Rp0</strong>
+              <small>APPROVED bulan ini</small>
             </article>
             <article class="mini-stat">
               <span>Draft</span>
@@ -252,10 +289,20 @@
                   </label>
 
                   <label class="form-field">
+                    <span>Penyimpanan Dana</span>
+                    <select id="incomeStorageType" required>
+                      <option value="">Pilih Cash / Rekening</option>
+                      <option value="CASH">Cash / Tunai</option>
+                      <option value="BANK">Rekening Bank</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field full">
                     <span>Akun Tujuan</span>
                     <select id="incomeDestinationAccount" required disabled>
-                      <option value="">Pilih akun kas/bank</option>
+                      <option value="">Pilih jenis penyimpanan terlebih dahulu</option>
                     </select>
+                    <small id="incomeStorageHelp">Cash dan rekening tetap dijumlahkan sebagai satu saldo Buku Besar.</small>
                   </label>
 
                   <label class="form-field full">
@@ -274,7 +321,7 @@
                 </div>
 
                 <div class="form-note">
-                  <strong>Catatan:</strong> transaksi yang disimpan sebagai Draft belum memengaruhi saldo. Saldo berubah setelah transaksi berstatus <b>APPROVED</b>.
+                  <strong>Catatan:</strong> pilih apakah uang diterima sebagai <b>Cash</b> atau masuk ke <b>Rekening</b>. Keduanya tetap menjadi satu kesatuan saldo Buku Besar. Draft belum memengaruhi saldo; saldo berubah setelah <b>APPROVED</b>.
                 </div>
 
                 <div class="form-actions">
@@ -294,7 +341,7 @@
                 <button id="refreshIncomeBtn" class="outline-btn small-action" type="button">↻ Refresh</button>
               </div>
 
-              <div class="income-filters">
+              <div class="income-filters income-filters-three">
                 <input id="incomeSearch" type="search" placeholder="Cari nomor/keterangan...">
                 <select id="incomeStatusFilter">
                   <option value="ALL">Semua Status</option>
@@ -303,6 +350,11 @@
                   <option value="APPROVED">APPROVED</option>
                   <option value="REJECTED">REJECTED</option>
                   <option value="VOID">VOID</option>
+                </select>
+                <select id="incomeStorageFilter">
+                  <option value="ALL">Semua Penyimpanan</option>
+                  <option value="CASH">Cash / Tunai</option>
+                  <option value="BANK">Rekening Bank</option>
                 </select>
               </div>
 
@@ -314,6 +366,7 @@
                       <th>No. Transaksi</th>
                       <th>Lembaga</th>
                       <th>Sumber</th>
+                      <th>Penyimpanan</th>
                       <th>Akun Tujuan</th>
                       <th>Nominal</th>
                       <th>Status</th>
@@ -321,7 +374,7 @@
                     </tr>
                   </thead>
                   <tbody id="incomeTransactionsBody">
-                    <tr><td colspan="8" class="empty">Memuat...</td></tr>
+                    <tr><td colspan="9" class="empty">Memuat...</td></tr>
                   </tbody>
                 </table>
               </div>

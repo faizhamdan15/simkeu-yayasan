@@ -91,6 +91,14 @@ function roleLabel(r){
     INSTITUTION_ADMIN:"Admin/Bendahara Lembaga",VIEWER:"Viewer"}[r]||r||"-";
 }
 function typeLabel(t){return {INCOME:"Pemasukan",EXPENSE:"Pengeluaran",TRANSFER:"Transfer"}[t]||t}
+function storageTypeLabel(type){
+  return {CASH:"Cash / Tunai",BANK:"Rekening Bank",E_WALLET:"E-Wallet",OTHER:"Lainnya"}[type]||"Lainnya";
+}
+function storageTypeClass(type){
+  if(type==="CASH") return "cash";
+  if(type==="BANK") return "bank";
+  return "other";
+}
 function typeClass(t){return {INCOME:"income",EXPENSE:"expense",TRANSFER:"transfer"}[t]||""}
 function statusClass(s){
   return {APPROVED:"approved",SUBMITTED:"submitted",DRAFT:"draft",REJECTED:"rejected",VOID:"void"}[s]||"draft"
@@ -245,8 +253,9 @@ async function loadDashboard(){
   $("refreshBtn").disabled=true;
   try{
     const r=monthRange(), y=new Date().getFullYear();
-    const [balances,monthly,pending,recent,yearly]=await Promise.all([
+    const [balances,accountsMaster,monthly,pending,recent,yearly]=await Promise.all([
       sb.from("v_account_balances").select("account_id,institution_id,institution_name,account_name,current_balance"),
+      sb.from("accounts").select("id,account_type").eq("is_active",true),
       sb.from("transactions").select("id,transaction_type,amount,expense_category_id,status,transaction_date,expense_categories:expense_category_id(name)")
         .eq("status","APPROVED").gte("transaction_date",r.start).lt("transaction_date",r.next),
       sb.from("transactions").select("id",{count:"exact",head:true}).eq("status","SUBMITTED"),
@@ -255,13 +264,23 @@ async function loadDashboard(){
       sb.from("transactions").select("transaction_date,transaction_type,amount,status").eq("status","APPROVED")
         .gte("transaction_date",`${y}-01-01`).lt("transaction_date",`${y+1}-01-01`)
     ]);
-    [balances,monthly,pending,recent,yearly].forEach(x=>{if(x.error)throw x.error});
+    [balances,accountsMaster,monthly,pending,recent,yearly].forEach(x=>{if(x.error)throw x.error});
     const b=balances.data||[], m=monthly.data||[];
-    $("totalBalance").textContent=rupiah(b.reduce((s,x)=>s+Number(x.current_balance||0),0));
+    const accountTypeMap=new Map((accountsMaster.data||[]).map(a=>[a.id,a.account_type]));
+    const total=b.reduce((s,x)=>s+Number(x.current_balance||0),0);
+    const cashTotal=b.filter(x=>accountTypeMap.get(x.account_id)==="CASH")
+      .reduce((s,x)=>s+Number(x.current_balance||0),0);
+    const bankTotal=b.filter(x=>accountTypeMap.get(x.account_id)==="BANK")
+      .reduce((s,x)=>s+Number(x.current_balance||0),0);
+
+    $("totalBalance").textContent=rupiah(total);
+    $("totalCashBalance").textContent=rupiah(cashTotal);
+    $("totalBankBalance").textContent=rupiah(bankTotal);
+    $("ledgerGrandBalance").textContent=rupiah(total);
     $("monthlyIncome").textContent=rupiah(m.filter(x=>x.transaction_type==="INCOME").reduce((s,x)=>s+Number(x.amount||0),0));
     $("monthlyExpense").textContent=rupiah(m.filter(x=>x.transaction_type==="EXPENSE").reduce((s,x)=>s+Number(x.amount||0),0));
     $("pendingCount").textContent=pending.count||0;
-    renderInstitutions(b);
+    renderInstitutions(b,accountTypeMap);
     renderRecent(recent.data||[]);
     renderCashflow(yearly.data||[]);
     renderExpense(m);
@@ -271,19 +290,28 @@ async function loadDashboard(){
   }finally{$("refreshBtn").disabled=false}
 }
 
-function renderInstitutions(rows){
+function renderInstitutions(rows,accountTypeMap=new Map()){
   const map=new Map();
   rows.forEach(r=>{
     const n=r.institution_name||"Lembaga";
-    if(!map.has(n))map.set(n,{total:0,count:0});
-    map.get(n).total+=Number(r.current_balance||0);
-    map.get(n).count++;
+    if(!map.has(n))map.set(n,{total:0,cash:0,bank:0,other:0,count:0});
+    const target=map.get(n);
+    const amount=Number(r.current_balance||0);
+    const type=accountTypeMap.get(r.account_id)||"OTHER";
+    target.total+=amount;
+    target.count++;
+    if(type==="CASH")target.cash+=amount;
+    else if(type==="BANK")target.bank+=amount;
+    else target.other+=amount;
   });
   $("institutionBalances").innerHTML=map.size?[...map.entries()].map(([n,v])=>`
     <div class="institution-row">
       <div class="institution-name">
         <div class="badge">${escapeHtml(n.slice(0,3).toUpperCase())}</div>
-        <div><strong>${escapeHtml(n)}</strong><span>${v.count} akun kas/bank</span></div>
+        <div>
+          <strong>${escapeHtml(n)}</strong>
+          <span class="institution-balance-breakdown">Cash ${rupiah(v.cash)} • Rekening ${rupiah(v.bank)}</span>
+        </div>
       </div>
       <div class="institution-amount">${rupiah(v.total)}</div>
     </div>`).join(""):`<div class="empty">Belum ada akun kas/bank.</div>`;
@@ -388,13 +416,36 @@ function fillIncomeMasterOptions(){
 
 function refreshIncomeAccountOptions(){
   const institutionId=$("incomeInstitution").value;
+  const storageType=$("incomeStorageType").value;
   const accountSelect=$("incomeDestinationAccount");
-  const rows=incomeAccounts.filter(a=>a.institution_id===institutionId);
 
-  accountSelect.innerHTML=`<option value="">Pilih akun kas/bank</option>`+
-    rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
+  const rows=incomeAccounts.filter(a=>a.institution_id===institutionId && a.account_type===storageType);
 
-  accountSelect.disabled=!institutionId || !rows.length;
+  let placeholder="Pilih lembaga dan jenis penyimpanan";
+  if(institutionId && !storageType) placeholder="Pilih Cash / Rekening terlebih dahulu";
+  if(institutionId && storageType && !rows.length){
+    placeholder=storageType==="CASH"
+      ? "Belum ada akun Cash untuk lembaga ini"
+      : "Belum ada rekening bank untuk lembaga ini";
+  }
+  if(rows.length) placeholder=storageType==="CASH" ? "Pilih Kas Tunai" : "Pilih Rekening Bank";
+
+  accountSelect.innerHTML=`<option value="">${placeholder}</option>`+
+    rows.map(a=>{
+      const bankInfo=a.account_type==="BANK" && a.bank_name && a.bank_name!=="Belum Diisi"
+        ? ` — ${escapeHtml(a.bank_name)}` : "";
+      return `<option value="${a.id}">${escapeHtml(a.account_name)}${bankInfo}</option>`;
+    }).join("");
+
+  accountSelect.disabled=!institutionId || !storageType || !rows.length;
+
+  if($("incomeStorageHelp")){
+    $("incomeStorageHelp").textContent=storageType==="CASH"
+      ? "Uang akan tercatat sebagai kas tunai, tetapi tetap masuk ke Total Buku Besar."
+      : storageType==="BANK"
+        ? "Uang akan tercatat di rekening bank, tetapi tetap masuk ke Total Buku Besar."
+        : "Cash dan rekening tetap dijumlahkan sebagai satu saldo Buku Besar.";
+  }
 }
 
 async function loadIncomeTransactions(){
@@ -427,11 +478,18 @@ async function loadIncomeTransactions(){
 
 function updateIncomeModuleStats(){
   const r=monthRange();
-  const approvedMonth=incomeRowsCache
-    .filter(x=>x.status==="APPROVED" && x.transaction_date>=r.start && x.transaction_date<r.next)
+  const approvedRows=incomeRowsCache
+    .filter(x=>x.status==="APPROVED" && x.transaction_date>=r.start && x.transaction_date<r.next);
+
+  const approvedMonth=approvedRows.reduce((s,x)=>s+Number(x.amount||0),0);
+  const cashMonth=approvedRows.filter(x=>x.accounts?.account_type==="CASH")
+    .reduce((s,x)=>s+Number(x.amount||0),0);
+  const bankMonth=approvedRows.filter(x=>x.accounts?.account_type==="BANK")
     .reduce((s,x)=>s+Number(x.amount||0),0);
 
   $("incomeModuleApproved").textContent=rupiah(approvedMonth);
+  $("incomeCashApproved").textContent=rupiah(cashMonth);
+  $("incomeBankApproved").textContent=rupiah(bankMonth);
   $("incomeDraftCount").textContent=incomeRowsCache.filter(x=>x.status==="DRAFT").length;
   $("incomeSubmittedCount").textContent=incomeRowsCache.filter(x=>x.status==="SUBMITTED").length;
 }
@@ -439,6 +497,7 @@ function updateIncomeModuleStats(){
 function renderIncomeRows(){
   const term=($("incomeSearch").value||"").trim().toLowerCase();
   const status=$("incomeStatusFilter").value;
+  const storage=$("incomeStorageFilter")?.value||"ALL";
 
   const rows=incomeRowsCache.filter(x=>{
     const hay=[
@@ -446,9 +505,12 @@ function renderIncomeRows(){
       x.description,
       x.institutions?.name,
       x.fund_sources?.name,
-      x.accounts?.account_name
+      x.accounts?.account_name,
+      storageTypeLabel(x.accounts?.account_type)
     ].filter(Boolean).join(" ").toLowerCase();
-    return (!term || hay.includes(term)) && (status==="ALL" || x.status===status);
+    return (!term || hay.includes(term)) &&
+      (status==="ALL" || x.status===status) &&
+      (storage==="ALL" || x.accounts?.account_type===storage);
   });
 
   $("incomeTransactionsBody").innerHTML=rows.length?rows.map(row=>{
@@ -482,12 +544,13 @@ function renderIncomeRows(){
         <td><strong>${escapeHtml(row.transaction_number||"-")}</strong><span class="account-sub description-cell" title="${escapeHtml(row.description||"")}">${escapeHtml(row.description||"")}</span></td>
         <td>${escapeHtml(row.institutions?.name||"-")}</td>
         <td>${escapeHtml(row.fund_sources?.name||"-")}</td>
+        <td><span class="storage-chip ${storageTypeClass(row.accounts?.account_type)}">${escapeHtml(storageTypeLabel(row.accounts?.account_type))}</span></td>
         <td>${escapeHtml(row.accounts?.account_name||"-")}</td>
         <td><strong>${rupiah(row.amount)}</strong></td>
         <td><span class="pill ${statusClass(row.status)}">${escapeHtml(row.status)}</span></td>
         <td><div class="action-group">${actions.join("") || `<span class="account-sub">—</span>`}</div></td>
       </tr>`;
-  }).join(""):`<tr><td colspan="8" class="empty">Belum ada data pemasukan sesuai filter.</td></tr>`;
+  }).join(""):`<tr><td colspan="9" class="empty">Belum ada data pemasukan sesuai filter.</td></tr>`;
 }
 
 function setIncomeEditMode(active){
@@ -513,7 +576,7 @@ function resetIncomeForm(){
     refreshIncomeAccountOptions();
   }else{
     $("incomeInstitution").disabled=false;
-    $("incomeDestinationAccount").innerHTML=`<option value="">Pilih akun kas/bank</option>`;
+    $("incomeDestinationAccount").innerHTML=`<option value="">Pilih jenis penyimpanan terlebih dahulu</option>`;
     $("incomeDestinationAccount").disabled=true;
   }
 }
@@ -529,8 +592,9 @@ function startEditIncome(id){
 
   $("incomeDate").value=row.transaction_date;
   $("incomeInstitution").value=row.institution_id;
-  refreshIncomeAccountOptions();
   $("incomeFundSource").value=row.fund_source_id||"";
+  $("incomeStorageType").value=row.accounts?.account_type||"";
+  refreshIncomeAccountOptions();
   $("incomeDestinationAccount").value=row.destination_account_id||"";
   $("incomeAmount").value=Number(row.amount||0);
   $("incomeAmountPreview").textContent=rupiah(row.amount);
@@ -548,14 +612,18 @@ async function saveIncome(action){
   const transaction_date=$("incomeDate").value;
   const amount=Number($("incomeAmount").value);
   const description=($("incomeDescription").value||"").trim();
+  const storage_type=$("incomeStorageType").value;
 
-  if(!transaction_date||!institution_id||!fund_source_id||!destination_account_id||!amount||amount<=0){
-    throw new Error("Lengkapi tanggal, lembaga, sumber dana, akun tujuan, dan nominal.");
+  if(!transaction_date||!institution_id||!fund_source_id||!storage_type||!destination_account_id||!amount||amount<=0){
+    throw new Error("Lengkapi tanggal, lembaga, sumber dana, penyimpanan Cash/Rekening, akun tujuan, dan nominal.");
   }
 
   const selectedAccount=incomeAccounts.find(a=>a.id===destination_account_id);
   if(!selectedAccount || selectedAccount.institution_id!==institution_id){
     throw new Error("Akun tujuan tidak sesuai dengan lembaga yang dipilih.");
+  }
+  if(selectedAccount.account_type!==storage_type){
+    throw new Error("Jenis penyimpanan tidak sesuai dengan akun tujuan. Pilih ulang Cash/Rekening.");
   }
 
   if(editingIncomeId){
@@ -3719,11 +3787,13 @@ $("backdrop").addEventListener("click",closeSidebar);
 /* Income events */
 $("cancelIncomeEditBtn").addEventListener("click",resetIncomeForm);
 $("incomeInstitution").addEventListener("change",refreshIncomeAccountOptions);
+$("incomeStorageType").addEventListener("change",refreshIncomeAccountOptions);
 $("incomeAmount").addEventListener("input",()=>{
   $("incomeAmountPreview").textContent=rupiah(Number($("incomeAmount").value||0));
 });
 $("incomeSearch").addEventListener("input",renderIncomeRows);
 $("incomeStatusFilter").addEventListener("change",renderIncomeRows);
+$("incomeStorageFilter").addEventListener("change",renderIncomeRows);
 $("refreshIncomeBtn").addEventListener("click",async()=>{
   await loadIncomeTransactions(); toast("Riwayat pemasukan diperbarui.");
 });

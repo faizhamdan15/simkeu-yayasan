@@ -1219,3 +1219,63 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
   font-size:9px;
   line-height:1.45;
 }
+
+
+/* =========================================================
+   CASH vs REKENING + BUKU BESAR v6.8
+   ========================================================= */
+.balance-composition{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:13px;margin-bottom:15px
+}
+.balance-composition-card{
+  background:#fff;border:1px solid var(--line);border-radius:15px;padding:14px 15px;
+  display:flex;align-items:center;gap:11px;box-shadow:0 7px 18px rgba(40,30,18,.025)
+}
+.balance-composition-icon{
+  width:40px;height:40px;border-radius:12px;display:grid;place-items:center;
+  flex:none;font-size:16px;background:#F7F3EE
+}
+.balance-composition-card>div:last-child{display:flex;flex-direction:column;gap:2px;min-width:0}
+.balance-composition-card span{font-size:9px;font-weight:800;color:#7C7168}
+.balance-composition-card strong{
+  font-size:17px;color:#27211C;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.balance-composition-card small{font-size:8px;color:#A39A91}
+.cash-card .balance-composition-icon{background:#EAF7EF}
+.bank-card .balance-composition-icon{background:#EDF4FF}
+.ledger-card{background:#FFF9F1;border-color:#EDD7BA}
+.ledger-card .balance-composition-icon{background:#F89921;color:#1F160C;font-weight:950}
+
+.income-storage-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
+.storage-cash-stat:before{background:#2F855A}
+.storage-bank-stat:before{background:#3B82F6}
+
+#incomeStorageHelp{font-size:8px;color:#978C82;line-height:1.4}
+.income-filters-three{
+  grid-template-columns:minmax(180px,1.4fr) minmax(130px,.8fr) minmax(150px,.9fr)!important
+}
+.storage-chip{
+  display:inline-flex;align-items:center;gap:5px;border-radius:999px;
+  padding:4px 7px;font-size:8px;font-weight:900;white-space:nowrap
+}
+.storage-chip.cash{background:#EAF7EF;color:#247147}
+.storage-chip.bank{background:#EDF4FF;color:#315FA8}
+.storage-chip.other{background:#F2F1EF;color:#69615A}
+.institution-balance-breakdown{
+  display:block;margin-top:2px;font-size:8px!important;color:#968B82!important
+}
+
+@media(max-width:1180px){
+  .income-storage-stats{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:900px){
+  .balance-composition{grid-template-columns:1fr}
+}
+@media(max-width:760px){
+  .income-storage-stats{grid-template-columns:1fr 1fr}
+  .income-filters-three{grid-template-columns:1fr!important}
+}
+@media(max-width:520px){
+  .income-storage-stats{grid-template-columns:1fr}
+}
