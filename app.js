@@ -14,18 +14,21 @@ let incomeAccounts = [];
 let incomeFundSources = [];
 let incomeRowsCache = [];
 let pendingIncomeSaveAction = "draft";
+let editingIncomeId = null;
 
 let expenseInstitutions = [];
 let expenseAccounts = [];
 let expenseCategories = [];
 let expenseRowsCache = [];
 let pendingExpenseSaveAction = "draft";
+let editingExpenseId = null;
 
 let transferInstitutions = [];
 let transferAccounts = [];
 let transferBalances = [];
 let transferRowsCache = [];
 let pendingTransferSaveAction = "draft";
+let editingTransferId = null;
 
 let reportInstitutions = [];
 let reportRowsCache = [];
@@ -57,6 +60,11 @@ let closingInstitutions = [];
 let closingRowsCache = [];
 let closingPendingRows = [];
 
+let executiveInstitutions = [];
+let executiveBalanceChart = null;
+let executiveFlowChart = null;
+let executiveDataCache = null;
+
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
 }).format(Number(n||0));
@@ -85,7 +93,7 @@ function roleLabel(r){
 function typeLabel(t){return {INCOME:"Pemasukan",EXPENSE:"Pengeluaran",TRANSFER:"Transfer"}[t]||t}
 function typeClass(t){return {INCOME:"income",EXPENSE:"expense",TRANSFER:"transfer"}[t]||""}
 function statusClass(s){
-  return {APPROVED:"approved",SUBMITTED:"submitted",DRAFT:"draft",REJECTED:"rejected",VOID:"draft"}[s]||"draft"
+  return {APPROVED:"approved",SUBMITTED:"submitted",DRAFT:"draft",REJECTED:"rejected",VOID:"void"}[s]||"draft"
 }
 function formatDate(v){
   if(!v)return "-";
@@ -99,6 +107,92 @@ function monthRange(){
 }
 function isCentralUser(){
   return ["SUPER_ADMIN","FOUNDATION_TREASURER"].includes(currentProfile?.role);
+}
+
+function canCorrectTransactionType(type){
+  if(isCentralUser()) return true;
+  return currentProfile?.role==="INSTITUTION_ADMIN" && ["INCOME","EXPENSE"].includes(type);
+}
+
+function isTransactionEditAllowed(row){
+  return row?.status==="DRAFT" && canCorrectTransactionType(row?.transaction_type||"");
+}
+
+async function reloadTransactionModule(type){
+  if(type==="INCOME") await loadIncomeTransactions();
+  if(type==="EXPENSE") await loadExpenseTransactions();
+  if(type==="TRANSFER") await loadTransferModule();
+  await loadDashboard();
+}
+
+async function deleteDraftTransaction(id,type,proofPaths=[]){
+  if(!confirm("Hapus transaksi Draft ini secara permanen? Tindakan ini akan tercatat di Audit Trail.")) return;
+
+  const {error}=await sb.rpc("delete_draft_transaction",{p_transaction_id:id});
+  if(error) throw error;
+
+  if(proofPaths.length){
+    const {error:storageError}=await sb.storage.from("transaction-proofs").remove(proofPaths);
+    if(storageError){
+      console.warn("Transaksi terhapus, tetapi pembersihan file Storage gagal:",storageError);
+      toast("Transaksi terhapus. Ada file Storage yang perlu dibersihkan.");
+    }
+  }
+
+  await reloadTransactionModule(type);
+  toast("Draft berhasil dihapus.");
+}
+
+async function withdrawSubmittedTransaction(id,type){
+  const note=prompt("Alasan menarik pengajuan (contoh: salah nominal / salah akun):");
+  if(note===null) return;
+  if(!note.trim()) throw new Error("Alasan menarik pengajuan wajib diisi.");
+
+  const {error}=await sb.rpc("withdraw_transaction",{
+    p_transaction_id:id,
+    p_note:note.trim()
+  });
+  if(error) throw error;
+
+  await reloadTransactionModule(type);
+  toast("Pengajuan ditarik. Status kembali menjadi DRAFT.");
+}
+
+async function reopenRejectedTransaction(id,type){
+  const note=prompt("Catatan perbaikan sebelum transaksi dikembalikan ke Draft:");
+  if(note===null) return;
+  if(!note.trim()) throw new Error("Catatan perbaikan wajib diisi.");
+
+  const {error}=await sb.rpc("reopen_rejected_transaction",{
+    p_transaction_id:id,
+    p_note:note.trim()
+  });
+  if(error) throw error;
+
+  await reloadTransactionModule(type);
+
+  if(type==="INCOME") startEditIncome(id);
+  if(type==="EXPENSE") startEditExpense(id);
+  if(type==="TRANSFER") startEditTransfer(id);
+
+  toast("Transaksi dikembalikan ke Draft untuk diperbaiki.");
+}
+
+async function voidApprovedTransaction(id,type){
+  const reason=prompt("Alasan VOID transaksi APPROVED:");
+  if(reason===null) return;
+  if(!reason.trim()) throw new Error("Alasan VOID wajib diisi.");
+
+  if(!confirm("VOID transaksi ini? Dampaknya pada saldo akan dibalik, tetapi riwayat transaksi tetap tersimpan.")) return;
+
+  const {error}=await sb.rpc("void_transaction",{
+    p_transaction_id:id,
+    p_reason:reason.trim()
+  });
+  if(error) throw error;
+
+  await reloadTransactionModule(type);
+  toast("Transaksi berhasil di-VOID. Saldo telah disesuaikan.");
 }
 function todayISO(){
   const d=new Date();
@@ -359,12 +453,27 @@ function renderIncomeRows(){
 
   $("incomeTransactionsBody").innerHTML=rows.length?rows.map(row=>{
     const actions=[];
-    if(row.status==="DRAFT"){
+    const canCorrect=canCorrectTransactionType("INCOME");
+
+    if(row.status==="DRAFT" && canCorrect){
+      actions.push(`<button class="table-action edit" data-income-action="edit" data-id="${row.id}">Edit</button>`);
       actions.push(`<button class="table-action primary" data-income-action="submit" data-id="${row.id}">Ajukan</button>`);
+      actions.push(`<button class="table-action delete" data-income-action="delete" data-id="${row.id}">Hapus</button>`);
     }
-    if(row.status==="SUBMITTED" && isCentralUser()){
-      actions.push(`<button class="table-action approve" data-income-action="approve" data-id="${row.id}">Setujui</button>`);
-      actions.push(`<button class="table-action reject" data-income-action="reject" data-id="${row.id}">Tolak</button>`);
+    if(row.status==="SUBMITTED"){
+      if(canCorrect){
+        actions.push(`<button class="table-action withdraw" data-income-action="withdraw" data-id="${row.id}">Tarik</button>`);
+      }
+      if(isCentralUser()){
+        actions.push(`<button class="table-action approve" data-income-action="approve" data-id="${row.id}">Setujui</button>`);
+        actions.push(`<button class="table-action reject" data-income-action="reject" data-id="${row.id}">Tolak</button>`);
+      }
+    }
+    if(row.status==="REJECTED" && canCorrect){
+      actions.push(`<button class="table-action fix" data-income-action="reopen" data-id="${row.id}">Perbaiki</button>`);
+    }
+    if(row.status==="APPROVED" && isCentralUser()){
+      actions.push(`<button class="table-action void-action" data-income-action="void" data-id="${row.id}">VOID</button>`);
     }
 
     return `
@@ -381,7 +490,20 @@ function renderIncomeRows(){
   }).join(""):`<tr><td colspan="8" class="empty">Belum ada data pemasukan sesuai filter.</td></tr>`;
 }
 
+function setIncomeEditMode(active){
+  $("incomeFormCard").classList.toggle("editing-transaction",active);
+  $("incomeFormTitle").textContent=active?"Edit Pemasukan Draft":"Input Pemasukan";
+  $("incomeFormSubtitle").textContent=active
+    ?"Perubahan hanya dapat dilakukan selama status masih DRAFT."
+    :"Lengkapi informasi dana yang diterima.";
+  $("saveIncomeDraftBtn").textContent=active?"Simpan Perubahan":"Simpan Draft";
+  $("saveIncomeSubmitBtn").classList.toggle("hidden",active);
+  $("cancelIncomeEditBtn").classList.toggle("hidden",!active);
+}
+
 function resetIncomeForm(){
+  editingIncomeId=null;
+  setIncomeEditMode(false);
   $("incomeForm").reset();
   $("incomeDate").value=todayISO();
   $("incomeAmountPreview").textContent="Rp0";
@@ -394,6 +516,27 @@ function resetIncomeForm(){
     $("incomeDestinationAccount").innerHTML=`<option value="">Pilih akun kas/bank</option>`;
     $("incomeDestinationAccount").disabled=true;
   }
+}
+
+function startEditIncome(id){
+  const row=incomeRowsCache.find(x=>x.id===id);
+  if(!row) throw new Error("Transaksi tidak ditemukan.");
+  if(row.status!=="DRAFT") throw new Error("Hanya transaksi DRAFT yang dapat diedit.");
+  if(!canCorrectTransactionType("INCOME")) throw new Error("Anda tidak memiliki hak untuk mengedit transaksi ini.");
+
+  editingIncomeId=id;
+  setIncomeEditMode(true);
+
+  $("incomeDate").value=row.transaction_date;
+  $("incomeInstitution").value=row.institution_id;
+  refreshIncomeAccountOptions();
+  $("incomeFundSource").value=row.fund_source_id||"";
+  $("incomeDestinationAccount").value=row.destination_account_id||"";
+  $("incomeAmount").value=Number(row.amount||0);
+  $("incomeAmountPreview").textContent=rupiah(row.amount);
+  $("incomeDescription").value=row.description||"";
+
+  $("incomeFormCard").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
 async function saveIncome(action){
@@ -413,6 +556,26 @@ async function saveIncome(action){
   const selectedAccount=incomeAccounts.find(a=>a.id===destination_account_id);
   if(!selectedAccount || selectedAccount.institution_id!==institution_id){
     throw new Error("Akun tujuan tidak sesuai dengan lembaga yang dipilih.");
+  }
+
+  if(editingIncomeId){
+    const {error:editError}=await sb.rpc("edit_draft_transaction",{
+      p_transaction_id:editingIncomeId,
+      p_transaction_date:transaction_date,
+      p_institution_id:institution_id,
+      p_fund_source_id:fund_source_id,
+      p_expense_category_id:null,
+      p_source_account_id:null,
+      p_destination_account_id:destination_account_id,
+      p_amount:amount,
+      p_description:description||null
+    });
+    if(editError) throw editError;
+
+    resetIncomeForm();
+    await Promise.all([loadIncomeTransactions(),loadDashboard()]);
+    toast("Pemasukan Draft berhasil diperbarui.");
+    return;
   }
 
   const payload={
@@ -584,12 +747,27 @@ function renderExpenseRows(){
 
   $("expenseTransactionsBody").innerHTML=rows.length?rows.map(row=>{
     const actions=[];
-    if(row.status==="DRAFT"){
+    const canCorrect=canCorrectTransactionType("EXPENSE");
+
+    if(row.status==="DRAFT" && canCorrect){
+      actions.push(`<button class="table-action edit" data-expense-action="edit" data-id="${row.id}">Edit</button>`);
       actions.push(`<button class="table-action primary" data-expense-action="submit" data-id="${row.id}">Ajukan</button>`);
+      actions.push(`<button class="table-action delete" data-expense-action="delete" data-id="${row.id}">Hapus</button>`);
     }
-    if(row.status==="SUBMITTED" && isCentralUser()){
-      actions.push(`<button class="table-action approve" data-expense-action="approve" data-id="${row.id}">Setujui</button>`);
-      actions.push(`<button class="table-action reject" data-expense-action="reject" data-id="${row.id}">Tolak</button>`);
+    if(row.status==="SUBMITTED"){
+      if(canCorrect){
+        actions.push(`<button class="table-action withdraw" data-expense-action="withdraw" data-id="${row.id}">Tarik</button>`);
+      }
+      if(isCentralUser()){
+        actions.push(`<button class="table-action approve" data-expense-action="approve" data-id="${row.id}">Setujui</button>`);
+        actions.push(`<button class="table-action reject" data-expense-action="reject" data-id="${row.id}">Tolak</button>`);
+      }
+    }
+    if(row.status==="REJECTED" && canCorrect){
+      actions.push(`<button class="table-action fix" data-expense-action="reopen" data-id="${row.id}">Perbaiki</button>`);
+    }
+    if(row.status==="APPROVED" && isCentralUser()){
+      actions.push(`<button class="table-action void-action" data-expense-action="void" data-id="${row.id}">VOID</button>`);
     }
 
     const proofs=row.transaction_attachments||[];
@@ -612,7 +790,20 @@ function renderExpenseRows(){
   }).join(""):`<tr><td colspan="9" class="empty">Belum ada data pengeluaran sesuai filter.</td></tr>`;
 }
 
+function setExpenseEditMode(active){
+  $("expenseFormCard").classList.toggle("editing-transaction",active);
+  $("expenseFormTitle").textContent=active?"Edit Pengeluaran Draft":"Input Pengeluaran";
+  $("expenseFormSubtitle").textContent=active
+    ?"Perbaiki data Draft. File bukti baru (jika dipilih) akan ditambahkan ke bukti yang sudah ada."
+    :"Bukti nota/kuitansi dapat diunggah langsung dari HP.";
+  $("saveExpenseDraftBtn").textContent=active?"Simpan Perubahan":"Simpan Draft";
+  $("saveExpenseSubmitBtn").classList.toggle("hidden",active);
+  $("cancelExpenseEditBtn").classList.toggle("hidden",!active);
+}
+
 function resetExpenseForm(){
+  editingExpenseId=null;
+  setExpenseEditMode(false);
   $("expenseForm").reset();
   $("expenseDate").value=todayISO();
   $("expenseAmountPreview").textContent="Rp0";
@@ -627,6 +818,31 @@ function resetExpenseForm(){
     $("expenseSourceAccount").innerHTML=`<option value="">Pilih kas/bank sumber</option>`;
     $("expenseSourceAccount").disabled=true;
   }
+}
+
+function startEditExpense(id){
+  const row=expenseRowsCache.find(x=>x.id===id);
+  if(!row) throw new Error("Transaksi tidak ditemukan.");
+  if(row.status!=="DRAFT") throw new Error("Hanya transaksi DRAFT yang dapat diedit.");
+  if(!canCorrectTransactionType("EXPENSE")) throw new Error("Anda tidak memiliki hak untuk mengedit transaksi ini.");
+
+  editingExpenseId=id;
+  setExpenseEditMode(true);
+
+  $("expenseDate").value=row.transaction_date;
+  $("expenseInstitution").value=row.institution_id;
+  refreshExpenseAccountOptions();
+  $("expenseCategory").value=row.expense_category_id||"";
+  $("expenseSourceAccount").value=row.source_account_id||"";
+  $("expenseAmount").value=Number(row.amount||0);
+  $("expenseAmountPreview").textContent=rupiah(row.amount);
+  $("expenseDescription").value=row.description||"";
+  $("expenseProof").value="";
+  $("expenseProofName").textContent=(row.transaction_attachments||[]).length
+    ? `${row.transaction_attachments.length} bukti sudah tersimpan • pilih file hanya jika ingin menambah bukti`
+    : "Belum ada bukti • Anda dapat menambahkan file sekarang";
+
+  $("expenseFormCard").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
 function safeFileName(name){
@@ -689,6 +905,28 @@ async function saveExpense(action){
   const selectedAccount=expenseAccounts.find(a=>a.id===source_account_id);
   if(!selectedAccount || selectedAccount.institution_id!==institution_id){
     throw new Error("Akun sumber tidak sesuai dengan lembaga yang dipilih.");
+  }
+
+  if(editingExpenseId){
+    const {error:editError}=await sb.rpc("edit_draft_transaction",{
+      p_transaction_id:editingExpenseId,
+      p_transaction_date:transaction_date,
+      p_institution_id:institution_id,
+      p_fund_source_id:null,
+      p_expense_category_id:expense_category_id,
+      p_source_account_id:source_account_id,
+      p_destination_account_id:null,
+      p_amount:amount,
+      p_description:description||null
+    });
+    if(editError) throw editError;
+
+    if(file) await uploadExpenseProof(editingExpenseId,file);
+
+    resetExpenseForm();
+    await Promise.all([loadExpenseTransactions(),loadDashboard()]);
+    toast("Pengeluaran Draft berhasil diperbarui.");
+    return;
   }
 
   const payload={
@@ -962,11 +1200,20 @@ function renderTransferRows(){
   $("transferTransactionsBody").innerHTML=rows.length?rows.map(row=>{
     const actions=[];
     if(row.status==="DRAFT" && isCentralUser()){
+      actions.push(`<button class="table-action edit" data-transfer-action="edit" data-id="${row.id}">Edit</button>`);
       actions.push(`<button class="table-action primary" data-transfer-action="submit" data-id="${row.id}">Ajukan</button>`);
+      actions.push(`<button class="table-action delete" data-transfer-action="delete" data-id="${row.id}">Hapus</button>`);
     }
     if(row.status==="SUBMITTED" && isCentralUser()){
+      actions.push(`<button class="table-action withdraw" data-transfer-action="withdraw" data-id="${row.id}">Tarik</button>`);
       actions.push(`<button class="table-action approve" data-transfer-action="approve" data-id="${row.id}">Setujui</button>`);
       actions.push(`<button class="table-action reject" data-transfer-action="reject" data-id="${row.id}">Tolak</button>`);
+    }
+    if(row.status==="REJECTED" && isCentralUser()){
+      actions.push(`<button class="table-action fix" data-transfer-action="reopen" data-id="${row.id}">Perbaiki</button>`);
+    }
+    if(row.status==="APPROVED" && isCentralUser()){
+      actions.push(`<button class="table-action void-action" data-transfer-action="void" data-id="${row.id}">VOID</button>`);
     }
 
     return `
@@ -992,11 +1239,52 @@ function renderTransferRows(){
   }).join(""):`<tr><td colspan="7" class="empty">Belum ada transfer internal sesuai filter.</td></tr>`;
 }
 
+function setTransferEditMode(active){
+  $("transferFormCard").classList.toggle("editing-transaction",active);
+  $("transferFormTitle").textContent=active?"Edit Transfer Draft":"Form Transfer Internal";
+  $("transferFormSubtitle").textContent=active
+    ?"Perubahan transfer hanya dapat dilakukan selama status masih DRAFT."
+    :"Pilih akun sumber dan akun tujuan.";
+  $("saveTransferDraftBtn").textContent=active?"Simpan Perubahan":"Simpan Draft";
+  $("saveTransferSubmitBtn").classList.toggle("hidden",active);
+  $("cancelTransferEditBtn").classList.toggle("hidden",!active);
+}
+
 function resetTransferForm(){
+  editingTransferId=null;
+  setTransferEditMode(false);
   $("transferForm").reset();
   $("transferDate").value=todayISO();
   $("transferAmountPreview").textContent="Rp0";
   fillTransferMasterOptions();
+}
+
+function startEditTransfer(id){
+  const row=transferRowsCache.find(x=>x.id===id);
+  if(!row) throw new Error("Transfer tidak ditemukan.");
+  if(row.status!=="DRAFT") throw new Error("Hanya transfer DRAFT yang dapat diedit.");
+  if(!isCentralUser()) throw new Error("Hanya akun Yayasan yang dapat mengedit transfer.");
+
+  editingTransferId=id;
+  setTransferEditMode(true);
+
+  $("transferDate").value=row.transaction_date;
+  $("transferSourceInstitution").value=row.institution_id;
+  refreshTransferSourceAccounts();
+  $("transferSourceAccount").value=row.source_account_id||"";
+  updateTransferBalanceHint();
+
+  const destinationInstitutionId=row.destination_account?.institution_id||"";
+  $("transferDestinationInstitution").value=destinationInstitutionId;
+  refreshTransferDestinationAccounts();
+  $("transferDestinationAccount").value=row.destination_account_id||"";
+
+  $("transferAmount").value=Number(row.amount||0);
+  $("transferAmountPreview").textContent=rupiah(row.amount);
+  $("transferDescription").value=row.description||"";
+  updateTransferBalanceHint();
+
+  $("transferFormCard").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
 async function saveTransfer(action){
@@ -1032,6 +1320,26 @@ async function saveTransfer(action){
 
   if(action==="submit" && amount>sourceBalance){
     throw new Error(`Saldo akun sumber tidak cukup. Saldo tersedia ${rupiah(sourceBalance)}.`);
+  }
+
+  if(editingTransferId){
+    const {error:editError}=await sb.rpc("edit_draft_transaction",{
+      p_transaction_id:editingTransferId,
+      p_transaction_date:transaction_date,
+      p_institution_id:sourceInstitutionId,
+      p_fund_source_id:null,
+      p_expense_category_id:null,
+      p_source_account_id:source_account_id,
+      p_destination_account_id:destination_account_id,
+      p_amount:amount,
+      p_description:description||null
+    });
+    if(editError) throw editError;
+
+    resetTransferForm();
+    await Promise.all([loadTransferModule(),loadDashboard()]);
+    toast("Transfer Draft berhasil diperbarui.");
+    return;
   }
 
   const payload={
@@ -1723,7 +2031,7 @@ function applyRoleBasedUI(){
   document.body.classList.toggle("institution-mode",!central);
 
   // Menu khusus pusat.
-  ["navInstitutions","navUsers","navAudit","navClosing"].forEach(id=>{
+  ["navInstitutions","navUsers","navAudit","navClosing","navExecutive"].forEach(id=>{
     const el=$(id);
     if(el) el.classList.toggle("role-hidden",!central);
   });
@@ -2094,7 +2402,9 @@ const AUDIT_ACTION_LABELS={
   TRANSACTION_SUBMITTED:"Transaksi diajukan",
   TRANSACTION_APPROVED:"Transaksi disetujui",
   TRANSACTION_REJECTED:"Transaksi ditolak",
-  TRANSACTION_VOIDED:"Transaksi dibatalkan",
+  TRANSACTION_VOIDED:"Transaksi di-VOID",
+  TRANSACTION_WITHDRAWN:"Pengajuan ditarik",
+  TRANSACTION_REOPENED:"Transaksi dibuka untuk perbaikan",
   TRANSACTION_DELETED:"Transaksi dihapus",
   PROOF_UPLOADED:"Bukti diunggah",
   PROOF_DELETED:"Bukti dihapus",
@@ -2191,7 +2501,13 @@ function auditDescription(row){
     return `${d.transaction_number||"Transaksi"} ditolak${d.rejection_note?` • ${d.rejection_note}`:""}.`;
   }
   if(action==="TRANSACTION_VOIDED"){
-    return `${d.transaction_number||"Transaksi"} dibatalkan/VOID.`;
+    return `${d.transaction_number||"Transaksi"} di-VOID${d.void_reason?` • ${d.void_reason}`:""}.`;
+  }
+  if(action==="TRANSACTION_WITHDRAWN"){
+    return `${d.transaction_number||"Transaksi"} ditarik kembali ke DRAFT${d.correction_note?` • ${d.correction_note}`:""}.`;
+  }
+  if(action==="TRANSACTION_REOPENED"){
+    return `${d.transaction_number||"Transaksi"} dibuka kembali untuk diperbaiki${d.correction_note?` • ${d.correction_note}`:""}.`;
   }
   if(action==="TRANSACTION_UPDATED"){
     const changes=[];
@@ -2439,6 +2755,8 @@ function showAuditDetail(id){
     ["account_name","Nama akun"],
     ["note","Catatan"],
     ["rejection_note","Alasan penolakan"],
+    ["correction_note","Catatan koreksi"],
+    ["void_reason","Alasan VOID"],
     ["fiscal_year","Tahun"],
     ["period_month","Bulan"],
     ["budget_amount","Anggaran"],
@@ -2849,6 +3167,408 @@ async function reopenPeriod(month){
   toast(`Periode ${MONTH_NAMES[month-1]} ${year} dibuka kembali.`);
 }
 
+
+/* =========================================================
+   DASHBOARD EKSEKUTIF YAYASAN v6.6
+   ========================================================= */
+
+function executiveMonthLabel(monthIndex){
+  return ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"][monthIndex]||"-";
+}
+
+function daysOld(createdAt){
+  if(!createdAt) return 0;
+  return Math.max(0,Math.floor((Date.now()-new Date(createdAt).getTime())/86400000));
+}
+
+async function loadExecutiveDashboard(){
+  if(!isCentralUser()){
+    toast("Dashboard Eksekutif hanya tersedia untuk akun Yayasan.");
+    await switchView("dashboard");
+    return;
+  }
+
+  try{
+    fillYearOptions("executiveYear",4,1);
+    await fetchExecutiveData();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat Dashboard Eksekutif: "+(err.message||"error"));
+  }
+}
+
+async function fetchExecutiveData(){
+  const year=Number($("executiveYear").value);
+  const start=`${year}-01-01`;
+  const next=`${year+1}-01-01`;
+
+  const [
+    instRes,
+    balancesRes,
+    trxRes,
+    budgetRes,
+    closingRes
+  ]=await Promise.all([
+    sb.from("institutions")
+      .select("id,name,code,institution_type,is_active")
+      .eq("is_active",true)
+      .order("name"),
+
+    sb.from("v_account_balances")
+      .select("account_id,institution_id,institution_name,account_name,current_balance"),
+
+    sb.from("transactions")
+      .select(`
+        id,transaction_number,transaction_date,transaction_type,institution_id,
+        amount,status,created_at,expense_category_id,
+        institutions:institution_id(name),
+        expense_categories:expense_category_id(name)
+      `)
+      .gte("transaction_date",start)
+      .lt("transaction_date",next)
+      .order("created_at",{ascending:false})
+      .limit(5000),
+
+    sb.from("v_budget_realization")
+      .select("budget_id,fiscal_year,institution_id,institution_name,expense_category_id,category_name,budget_amount,realization_amount,remaining_amount,absorption_percent")
+      .eq("fiscal_year",year),
+
+    sb.from("period_closures")
+      .select("institution_id,fiscal_year,period_month,status,closed_at")
+      .eq("fiscal_year",year)
+      .eq("status","CLOSED")
+  ]);
+
+  [instRes,balancesRes,trxRes,budgetRes,closingRes].forEach(r=>{if(r.error)throw r.error});
+
+  executiveInstitutions=instRes.data||[];
+  executiveDataCache={
+    year,
+    balances:balancesRes.data||[],
+    transactions:trxRes.data||[],
+    budgets:budgetRes.data||[],
+    closures:closingRes.data||[]
+  };
+
+  renderExecutiveDashboard();
+}
+
+function buildExecutiveInstitutionStats(){
+  const {transactions,balances,budgets}=executiveDataCache;
+  const result=new Map();
+
+  executiveInstitutions.forEach(i=>{
+    result.set(i.id,{
+      id:i.id,
+      name:i.name,
+      code:i.code,
+      type:i.institution_type,
+      balance:0,
+      income:0,
+      expense:0,
+      pending:0,
+      budget:0,
+      realization:0
+    });
+  });
+
+  balances.forEach(b=>{
+    const x=result.get(b.institution_id);
+    if(x)x.balance+=Number(b.current_balance||0);
+  });
+
+  transactions.forEach(t=>{
+    const x=result.get(t.institution_id);
+    if(!x)return;
+    if(t.status==="APPROVED" && t.transaction_type==="INCOME") x.income+=Number(t.amount||0);
+    if(t.status==="APPROVED" && t.transaction_type==="EXPENSE") x.expense+=Number(t.amount||0);
+    if(t.status==="SUBMITTED") x.pending++;
+  });
+
+  budgets.forEach(b=>{
+    const x=result.get(b.institution_id);
+    if(!x)return;
+    x.budget+=Number(b.budget_amount||0);
+    x.realization+=Number(b.realization_amount||0);
+  });
+
+  return [...result.values()];
+}
+
+function executiveHealth(inst){
+  const absorption=inst.budget>0 ? inst.realization/inst.budget*100 : 0;
+  const net=inst.income-inst.expense;
+
+  if(inst.balance<0 || absorption>100 || inst.pending>=5){
+    return {label:"PERLU PERHATIAN",cls:"critical"};
+  }
+  if(absorption>=80 || inst.pending>0 || net<0){
+    return {label:"WASPADA",cls:"warning"};
+  }
+  return {label:"SEHAT",cls:"healthy"};
+}
+
+function renderExecutiveDashboard(){
+  if(!executiveDataCache)return;
+  const {year,transactions,balances,budgets,closures}=executiveDataCache;
+  const stats=buildExecutiveInstitutionStats();
+
+  const totalBalance=balances.reduce((s,x)=>s+Number(x.current_balance||0),0);
+  const approved=transactions.filter(t=>t.status==="APPROVED");
+  const totalIncome=approved.filter(t=>t.transaction_type==="INCOME").reduce((s,t)=>s+Number(t.amount||0),0);
+  const totalExpense=approved.filter(t=>t.transaction_type==="EXPENSE").reduce((s,t)=>s+Number(t.amount||0),0);
+  const pending=transactions.filter(t=>t.status==="SUBMITTED");
+
+  const budgetTotal=budgets.reduce((s,b)=>s+Number(b.budget_amount||0),0);
+  const realizationTotal=budgets.reduce((s,b)=>s+Number(b.realization_amount||0),0);
+  const budgetPct=budgetTotal>0?realizationTotal/budgetTotal*100:0;
+
+  $("execTotalBalance").textContent=rupiah(totalBalance);
+  $("execNetCashflow").textContent=rupiah(totalIncome-totalExpense);
+  $("execNetCashflow").classList.toggle("budget-negative",totalIncome-totalExpense<0);
+  $("execNetCashflowMeta").textContent=`Pemasukan ${rupiah(totalIncome)} • Pengeluaran ${rupiah(totalExpense)}`;
+  $("execPendingCount").textContent=pending.length;
+  $("execPendingMeta").textContent=pending.length?`${pending.filter(t=>daysOld(t.created_at)>=3).length} transaksi berusia ≥3 hari`:"Tidak ada antrean approval";
+  $("execBudgetAbsorption").textContent=(Math.round(budgetPct*10)/10).toLocaleString("id-ID")+"%";
+  $("execBudgetMeta").textContent=budgetTotal>0?`${rupiah(realizationTotal)} dari ${rupiah(budgetTotal)}`:"Anggaran belum ditetapkan";
+
+  renderExecutiveInstitutionCards(stats);
+  renderExecutiveBalanceChart(stats);
+  renderExecutiveFlowChart(stats,year);
+  renderExecutiveClosing(stats,closures,year);
+  renderExecutiveBudgetAlerts(budgets);
+  renderExecutivePending(pending);
+  renderExecutiveFocus(stats,budgets,pending,closures,year);
+  renderExecutivePriority(stats,budgets,pending,closures,year);
+}
+
+function renderExecutiveInstitutionCards(stats){
+  $("executiveInstitutionCards").innerHTML=stats.length?stats.map(i=>{
+    const h=executiveHealth(i);
+    const pct=i.budget>0?i.realization/i.budget*100:null;
+    return `<article class="executive-inst-card ${h.cls}">
+      <div class="executive-inst-head">
+        <div>
+          <h4>${escapeHtml(i.name)}</h4>
+          <small>${escapeHtml(i.type||"LEMBAGA")}</small>
+        </div>
+        <span class="health-chip ${h.cls}">${h.label}</span>
+      </div>
+      <div class="executive-inst-balance">
+        <span>Saldo Saat Ini</span>
+        <strong>${rupiah(i.balance)}</strong>
+      </div>
+      <div class="executive-inst-metrics">
+        <div><span>Arus Bersih</span><strong>${rupiah(i.income-i.expense)}</strong></div>
+        <div><span>Serapan</span><strong>${pct===null?"Belum ada":(Math.round(pct*10)/10).toLocaleString("id-ID")+"%"}</strong></div>
+        <div><span>Pending</span><strong>${i.pending}</strong></div>
+      </div>
+    </article>`;
+  }).join(""):`<div class="empty">Belum ada data lembaga.</div>`;
+}
+
+function renderExecutiveBalanceChart(stats){
+  if(executiveBalanceChart)executiveBalanceChart.destroy();
+  executiveBalanceChart=new Chart($("executiveBalanceChart"),{
+    type:"bar",
+    data:{
+      labels:stats.map(x=>x.name),
+      datasets:[{
+        label:"Saldo",
+        data:stats.map(x=>x.balance),
+        backgroundColor:"#F89921",
+        borderRadius:6
+      }]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>rupiah(c.raw)}}},
+      scales:{
+        x:{grid:{display:false}},
+        y:{beginAtZero:true,ticks:{callback:v=>shortMoney(v)},grid:{color:"#F0ECE7"}}
+      }
+    }
+  });
+}
+
+function renderExecutiveFlowChart(stats,year){
+  $("execFlowSubtitle").textContent=`Pemasukan dan pengeluaran APPROVED tahun ${year}`;
+
+  if(executiveFlowChart)executiveFlowChart.destroy();
+  executiveFlowChart=new Chart($("executiveFlowChart"),{
+    type:"bar",
+    data:{
+      labels:stats.map(x=>x.name),
+      datasets:[
+        {label:"Pemasukan",data:stats.map(x=>x.income),backgroundColor:"#F89921",borderRadius:5},
+        {label:"Pengeluaran",data:stats.map(x=>x.expense),backgroundColor:"#4A4038",borderRadius:5}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:"top",align:"end"},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${rupiah(c.raw)}`}}},
+      scales:{
+        x:{grid:{display:false}},
+        y:{beginAtZero:true,ticks:{callback:v=>shortMoney(v)},grid:{color:"#F0ECE7"}}
+      }
+    }
+  });
+}
+
+function previousMonthForExecutive(year){
+  const now=new Date();
+  if(year===now.getFullYear()){
+    let month=now.getMonth(); // 0 means January; previous month = December prior year.
+    if(month===0) return {year:year-1,month:12};
+    return {year,month};
+  }
+  return {year,month:12};
+}
+
+function renderExecutiveClosing(stats,closures,year){
+  const target=previousMonthForExecutive(year);
+  $("execClosingSubtitle").textContent=`Status ${MONTH_NAMES[target.month-1]} ${target.year}`;
+
+  // If the selected year's previous period crosses into prior year, we don't have that closure in cache.
+  if(target.year!==year){
+    $("executiveClosingList").innerHTML=`<div class="empty">Pilih tahun ${target.year} untuk melihat status Desember.</div>`;
+    return;
+  }
+
+  const closedSet=new Set(
+    closures
+      .filter(c=>Number(c.period_month)===target.month)
+      .map(c=>c.institution_id)
+  );
+
+  $("executiveClosingList").innerHTML=stats.length?stats.map(i=>`
+    <div class="executive-close-row">
+      <strong>${escapeHtml(i.name)}</strong>
+      <span class="${closedSet.has(i.id)?"closed":"open"}">${closedSet.has(i.id)?"CLOSED":"OPEN"}</span>
+    </div>
+  `).join(""):`<div class="empty">Belum ada data.</div>`;
+}
+
+function renderExecutiveBudgetAlerts(budgets){
+  const rows=budgets
+    .map(b=>{
+      const budget=Number(b.budget_amount||0), real=Number(b.realization_amount||0);
+      const pct=budget>0?real/budget*100:(real>0?999:0);
+      return {...b,_pct:pct};
+    })
+    .filter(b=>b._pct>=80)
+    .sort((a,b)=>b._pct-a._pct)
+    .slice(0,7);
+
+  $("executiveBudgetAlerts").innerHTML=rows.length?rows.map(b=>{
+    const over=b._pct>100;
+    return `<div class="executive-alert-row ${over?"over":""}">
+      <div class="top">
+        <strong>${escapeHtml(b.institution_name)} • ${escapeHtml(b.category_name)}</strong>
+        <span>${b._pct>=999?">999":(Math.round(b._pct*10)/10).toLocaleString("id-ID")}%</span>
+      </div>
+      <small>${rupiah(b.realization_amount)} dari ${rupiah(b.budget_amount)}</small>
+      <div class="executive-alert-progress"><i style="width:${Math.min(100,b._pct)}%"></i></div>
+    </div>`;
+  }).join(""):`<div class="empty">Tidak ada anggaran kritis. ✓</div>`;
+}
+
+function renderExecutivePending(pending){
+  const rows=pending.slice().sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(0,8);
+
+  $("executivePendingBody").innerHTML=rows.length?rows.map(t=>{
+    const age=daysOld(t.created_at);
+    return `<tr>
+      <td><span class="pending-age ${age>=3?"old":""}">${age===0?"Hari ini":age+" hari"}</span></td>
+      <td><strong>${escapeHtml(t.transaction_number||"-")}</strong></td>
+      <td>${escapeHtml(t.institutions?.name||"-")}</td>
+      <td><span class="pill ${typeClass(t.transaction_type)}">${typeLabel(t.transaction_type)}</span></td>
+      <td><strong>${rupiah(t.amount)}</strong></td>
+      <td>${formatDate(t.transaction_date)}</td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="6" class="empty">Tidak ada transaksi menunggu persetujuan. ✓</td></tr>`;
+}
+
+function renderExecutiveFocus(stats,budgets,pending,closures,year){
+  const focuses=[];
+
+  const oldPending=pending.filter(t=>daysOld(t.created_at)>=3);
+  if(oldPending.length){
+    focuses.push({
+      icon:"!",
+      title:`${oldPending.length} approval tertunda ≥3 hari`,
+      text:"Prioritaskan pemeriksaan bukti dan keputusan approve/reject."
+    });
+  }
+
+  const overBudget=budgets.filter(b=>Number(b.realization_amount||0)>Number(b.budget_amount||0));
+  if(overBudget.length){
+    focuses.push({
+      icon:"%",
+      title:`${overBudget.length} kategori melebihi anggaran`,
+      text:"Tinjau penyebab realisasi berlebih sebelum pengeluaran selanjutnya."
+    });
+  }
+
+  const negative=stats.filter(i=>i.balance<0);
+  if(negative.length){
+    focuses.push({
+      icon:"Rp",
+      title:`${negative.length} lembaga memiliki saldo negatif`,
+      text:negative.map(x=>x.name).join(", ")
+    });
+  }
+
+  const target=previousMonthForExecutive(year);
+  if(target.year===year){
+    const closedSet=new Set(closures.filter(c=>Number(c.period_month)===target.month).map(c=>c.institution_id));
+    const notClosed=stats.filter(i=>!closedSet.has(i.id));
+    if(notClosed.length){
+      focuses.push({
+        icon:"🔒",
+        title:`${notClosed.length} lembaga belum tutup buku ${MONTH_NAMES[target.month-1]}`,
+        text:notClosed.map(x=>x.name).join(", ")
+      });
+    }
+  }
+
+  if(!focuses.length){
+    focuses.push({
+      icon:"✓",
+      title:"Tidak ada prioritas kritis",
+      text:"Indikator utama pada tahun dan periode ini berada dalam kondisi terkendali."
+    });
+  }
+
+  $("executiveFocusList").innerHTML=focuses.slice(0,5).map(f=>`
+    <div class="executive-focus-row">
+      <div class="executive-focus-icon">${f.icon}</div>
+      <div class="executive-focus-text">
+        <strong>${escapeHtml(f.title)}</strong>
+        <small>${escapeHtml(f.text)}</small>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderExecutivePriority(stats,budgets,pending,closures,year){
+  const issues=[];
+  const old=pending.filter(t=>daysOld(t.created_at)>=3).length;
+  const over=budgets.filter(b=>Number(b.realization_amount||0)>Number(b.budget_amount||0)).length;
+  const critical=stats.filter(i=>executiveHealth(i).cls==="critical").length;
+
+  if(old)issues.push(`${old} approval tertunda ≥3 hari`);
+  if(over)issues.push(`${over} kategori over-budget`);
+  if(critical)issues.push(`${critical} lembaga berstatus perlu perhatian`);
+
+  if(issues.length){
+    $("executivePriorityAlert").classList.remove("hidden");
+    $("executivePriorityAlert").textContent=`Prioritas pimpinan: ${issues.join(" • ")}.`;
+  }else{
+    $("executivePriorityAlert").classList.add("hidden");
+  }
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -2885,6 +3605,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   const auditVisible=!$("auditSection").classList.contains("hidden");
   const budgetVisible=!$("budgetSection").classList.contains("hidden");
   const closingVisible=!$("closingSection").classList.contains("hidden");
+  const executiveVisible=!$("executiveSection").classList.contains("hidden");
 
   if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
   else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
@@ -2895,6 +3616,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   else if(auditVisible) await Promise.all([loadDashboard(),fetchAuditLogs()]);
   else if(budgetVisible) await Promise.all([loadDashboard(),fetchBudgetRealization()]);
   else if(closingVisible) await Promise.all([loadDashboard(),fetchClosingData()]);
+  else if(executiveVisible) await Promise.all([loadDashboard(),fetchExecutiveData()]);
   else await loadDashboard();
 
   toast("Data diperbarui.");
@@ -2912,12 +3634,13 @@ const meta={
   pengguna:["Pengguna","Kelola akun dan hak akses"],
   audit:["Audit Trail","Riwayat aktivitas dan perubahan sistem"],
   anggaran:["Anggaran","Anggaran, realisasi, dan serapan"],
-  tutupbuku:["Tutup Buku","Finalisasi dan penguncian periode bulanan"]
+  tutupbuku:["Tutup Buku","Finalisasi dan penguncian periode bulanan"],
+  eksekutif:["Dashboard Eksekutif","Ringkasan kondisi keuangan seluruh lembaga"]
 };
 
 async function switchView(v){
   // Halaman pusat tidak boleh dibuka dari akun lembaga meskipun dipanggil manual.
-  if(!isCentralUser() && ["lembaga","pengguna","audit","tutupbuku"].includes(v)){
+  if(!isCentralUser() && ["lembaga","pengguna","audit","tutupbuku","eksekutif"].includes(v)){
     toast("Menu ini hanya tersedia untuk akun Yayasan.");
     v="dashboard";
   }
@@ -2947,9 +3670,10 @@ async function switchView(v){
   $("auditSection").classList.toggle("hidden",v!=="audit");
   $("budgetSection").classList.toggle("hidden",v!=="anggaran");
   $("closingSection").classList.toggle("hidden",v!=="tutupbuku");
+  $("executiveSection").classList.toggle("hidden",v!=="eksekutif");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","analitik","lembaga","pengguna","audit","anggaran","tutupbuku"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -2974,6 +3698,8 @@ async function switchView(v){
     await loadBudgetModule();
   }else if(v==="tutupbuku"){
     await loadClosingModule();
+  }else if(v==="eksekutif"){
+    await loadExecutiveDashboard();
   }else if(v!=="dashboard"){
     $("placeholderTitle").textContent=meta[v][0];
   }
@@ -2991,6 +3717,7 @@ $("closeSidebar").addEventListener("click",closeSidebar);
 $("backdrop").addEventListener("click",closeSidebar);
 
 /* Income events */
+$("cancelIncomeEditBtn").addEventListener("click",resetIncomeForm);
 $("incomeInstitution").addEventListener("change",refreshIncomeAccountOptions);
 $("incomeAmount").addEventListener("input",()=>{
   $("incomeAmountPreview").textContent=rupiah(Number($("incomeAmount").value||0));
@@ -3001,6 +3728,7 @@ $("refreshIncomeBtn").addEventListener("click",async()=>{
   await loadIncomeTransactions(); toast("Riwayat pemasukan diperbarui.");
 });
 $("newIncomeBtn").addEventListener("click",()=>{
+  resetIncomeForm();
   $("incomeFormCard").scrollIntoView({behavior:"smooth",block:"start"});
   setTimeout(()=>$("incomeDate").focus(),300);
 });
@@ -3029,9 +3757,14 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
   try{
     const id=btn.dataset.id;
     const action=btn.dataset.incomeAction;
+    if(action==="edit") startEditIncome(id);
     if(action==="submit") await submitExistingIncome(id);
+    if(action==="delete") await deleteDraftTransaction(id,"INCOME");
+    if(action==="withdraw") await withdrawSubmittedTransaction(id,"INCOME");
+    if(action==="reopen") await reopenRejectedTransaction(id,"INCOME");
     if(action==="approve") await approveIncome(id);
     if(action==="reject") await rejectIncome(id);
+    if(action==="void") await voidApprovedTransaction(id,"INCOME");
   }catch(err){
     console.error(err);
     toast("Aksi gagal: "+(err.message||"error"));
@@ -3046,6 +3779,31 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
 
 
 
+
+
+/* Executive Dashboard events */
+$("executiveYear").addEventListener("change",async()=>{
+  try{
+    await fetchExecutiveData();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memperbarui Dashboard Eksekutif: "+(err.message||"error"));
+  }
+});
+
+$("refreshExecutiveBtn").addEventListener("click",async()=>{
+  try{
+    await fetchExecutiveData();
+    toast("Dashboard Eksekutif diperbarui.");
+  }catch(err){
+    console.error(err);
+    toast("Gagal memperbarui Dashboard Eksekutif: "+(err.message||"error"));
+  }
+});
+
+document.querySelectorAll("[data-exec-nav]").forEach(btn=>{
+  btn.addEventListener("click",()=>switchView(btn.dataset.execNav));
+});
 
 /* Budget events */
 $("budgetYear").addEventListener("change",async()=>{
@@ -3234,6 +3992,7 @@ $("refreshAnalyticsBtn").addEventListener("click",async()=>{
 });
 
 /* Transfer events */
+$("cancelTransferEditBtn").addEventListener("click",resetTransferForm);
 $("transferSourceInstitution").addEventListener("change",refreshTransferSourceAccounts);
 $("transferDestinationInstitution").addEventListener("change",refreshTransferDestinationAccounts);
 $("transferSourceAccount").addEventListener("change",()=>{
@@ -3251,6 +4010,7 @@ $("refreshTransferBtn").addEventListener("click",async()=>{
   await loadTransferModule(); toast("Riwayat transfer diperbarui.");
 });
 $("newTransferBtn").addEventListener("click",()=>{
+  resetTransferForm();
   $("transferFormCard").scrollIntoView({behavior:"smooth",block:"start"});
   setTimeout(()=>$("transferDate").focus(),300);
 });
@@ -3278,9 +4038,14 @@ $("transferTransactionsBody").addEventListener("click",async e=>{
   try{
     const id=btn.dataset.id;
     const action=btn.dataset.transferAction;
+    if(action==="edit") startEditTransfer(id);
     if(action==="submit") await submitExistingTransfer(id);
+    if(action==="delete") await deleteDraftTransaction(id,"TRANSFER");
+    if(action==="withdraw") await withdrawSubmittedTransaction(id,"TRANSFER");
+    if(action==="reopen") await reopenRejectedTransaction(id,"TRANSFER");
     if(action==="approve") await approveTransfer(id);
     if(action==="reject") await rejectTransfer(id);
+    if(action==="void") await voidApprovedTransaction(id,"TRANSFER");
   }catch(err){
     console.error(err);
     toast("Aksi transfer gagal: "+(err.message||"error"));
@@ -3290,6 +4055,7 @@ $("transferTransactionsBody").addEventListener("click",async e=>{
 });
 
 /* Expense events */
+$("cancelExpenseEditBtn").addEventListener("click",resetExpenseForm);
 $("expenseInstitution").addEventListener("change",refreshExpenseAccountOptions);
 $("expenseAmount").addEventListener("input",()=>{
   $("expenseAmountPreview").textContent=rupiah(Number($("expenseAmount").value||0));
@@ -3304,6 +4070,7 @@ $("refreshExpenseBtn").addEventListener("click",async()=>{
   await loadExpenseTransactions(); toast("Riwayat pengeluaran diperbarui.");
 });
 $("newExpenseBtn").addEventListener("click",()=>{
+  resetExpenseForm();
   $("expenseFormCard").scrollIntoView({behavior:"smooth",block:"start"});
   setTimeout(()=>$("expenseDate").focus(),300);
 });
@@ -3332,10 +4099,19 @@ $("expenseTransactionsBody").addEventListener("click",async e=>{
   try{
     const id=btn.dataset.id;
     const action=btn.dataset.expenseAction;
+    if(action==="edit") startEditExpense(id);
     if(action==="submit") await submitExistingExpense(id);
+    if(action==="delete"){
+      const row=expenseRowsCache.find(x=>x.id===id);
+      const paths=(row?.transaction_attachments||[]).map(x=>x.file_path).filter(Boolean);
+      await deleteDraftTransaction(id,"EXPENSE",paths);
+    }
+    if(action==="withdraw") await withdrawSubmittedTransaction(id,"EXPENSE");
+    if(action==="reopen") await reopenRejectedTransaction(id,"EXPENSE");
     if(action==="approve") await approveExpense(id);
     if(action==="reject") await rejectExpense(id);
     if(action==="proof") await viewExpenseProof(id);
+    if(action==="void") await voidApprovedTransaction(id,"EXPENSE");
   }catch(err){
     console.error(err);
     toast("Aksi gagal: "+(err.message||"error"));

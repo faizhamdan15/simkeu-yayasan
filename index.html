@@ -72,6 +72,7 @@
 
       <nav>
         <button class="nav active" data-view="dashboard">▦ Dashboard</button>
+        <button id="navExecutive" class="nav central-nav" data-view="eksekutif">◈ Eksekutif</button>
         <button class="nav" data-view="pemasukan">↓ Pemasukan</button>
         <button class="nav" data-view="pengeluaran">↑ Pengeluaran</button>
         <button id="navTransfer" class="nav" data-view="transfer">⇄ Transfer Internal</button>
@@ -225,8 +226,8 @@
           <div class="income-layout">
             <article id="incomeFormCard" class="panel form-panel">
               <div class="panel-title">
-                <h3>Input Pemasukan</h3>
-                <p>Lengkapi informasi dana yang diterima.</p>
+                <h3 id="incomeFormTitle">Input Pemasukan</h3>
+                <p id="incomeFormSubtitle">Lengkapi informasi dana yang diterima.</p>
               </div>
 
               <form id="incomeForm" class="finance-form">
@@ -277,6 +278,7 @@
                 </div>
 
                 <div class="form-actions">
+                  <button id="cancelIncomeEditBtn" class="outline-btn correction-cancel hidden" type="button">Batal Edit</button>
                   <button id="saveIncomeDraftBtn" class="secondary-btn" type="submit" data-action="draft">Simpan Draft</button>
                   <button id="saveIncomeSubmitBtn" class="brand-btn" type="submit" data-action="submit">Simpan & Ajukan</button>
                 </div>
@@ -300,6 +302,7 @@
                   <option value="SUBMITTED">SUBMITTED</option>
                   <option value="APPROVED">APPROVED</option>
                   <option value="REJECTED">REJECTED</option>
+                  <option value="VOID">VOID</option>
                 </select>
               </div>
 
@@ -358,8 +361,8 @@
           <div class="income-layout">
             <article id="expenseFormCard" class="panel form-panel">
               <div class="panel-title">
-                <h3>Input Pengeluaran</h3>
-                <p>Bukti nota/kuitansi dapat diunggah langsung dari HP.</p>
+                <h3 id="expenseFormTitle">Input Pengeluaran</h3>
+                <p id="expenseFormSubtitle">Bukti nota/kuitansi dapat diunggah langsung dari HP.</p>
               </div>
 
               <form id="expenseForm" class="finance-form">
@@ -422,6 +425,7 @@
                 </div>
 
                 <div class="form-actions">
+                  <button id="cancelExpenseEditBtn" class="outline-btn correction-cancel hidden" type="button">Batal Edit</button>
                   <button id="saveExpenseDraftBtn" class="secondary-btn" type="submit" data-action="draft">Simpan Draft</button>
                   <button id="saveExpenseSubmitBtn" class="brand-btn" type="submit" data-action="submit">Simpan & Ajukan</button>
                 </div>
@@ -445,6 +449,7 @@
                   <option value="SUBMITTED">SUBMITTED</option>
                   <option value="APPROVED">APPROVED</option>
                   <option value="REJECTED">REJECTED</option>
+                  <option value="VOID">VOID</option>
                 </select>
               </div>
 
@@ -511,8 +516,8 @@
           <div class="income-layout">
             <article id="transferFormCard" class="panel form-panel">
               <div class="panel-title">
-                <h3>Form Transfer Internal</h3>
-                <p>Pilih akun sumber dan akun tujuan.</p>
+                <h3 id="transferFormTitle">Form Transfer Internal</h3>
+                <p id="transferFormSubtitle">Pilih akun sumber dan akun tujuan.</p>
               </div>
 
               <form id="transferForm" class="finance-form">
@@ -582,6 +587,7 @@
                 </div>
 
                 <div class="form-actions">
+                  <button id="cancelTransferEditBtn" class="outline-btn correction-cancel hidden" type="button">Batal Edit</button>
                   <button id="saveTransferDraftBtn" class="secondary-btn" type="submit" data-action="draft">Simpan Draft</button>
                   <button id="saveTransferSubmitBtn" class="brand-btn" type="submit" data-action="submit">Simpan & Ajukan</button>
                 </div>
@@ -605,6 +611,7 @@
                   <option value="SUBMITTED">SUBMITTED</option>
                   <option value="APPROVED">APPROVED</option>
                   <option value="REJECTED">REJECTED</option>
+                  <option value="VOID">VOID</option>
                 </select>
               </div>
 
@@ -993,6 +1000,7 @@
                   <option value="APPROVED">APPROVED</option>
                   <option value="DRAFT">DRAFT</option>
                   <option value="REJECTED">REJECTED</option>
+                  <option value="VOID">VOID</option>
                 </select>
               </label>
 
@@ -1367,6 +1375,162 @@
 
           <div id="closingMonthsGrid" class="closing-month-grid">
             <div class="empty">Pilih lembaga untuk melihat periode.</div>
+          </div>
+        </div>
+
+
+        <div id="executiveSection" class="module-section hidden">
+          <div class="module-hero executive-hero">
+            <div>
+              <span class="module-kicker">RINGKASAN PIMPINAN</span>
+              <h1>Dashboard Eksekutif Yayasan</h1>
+              <p>Kondisi keuangan seluruh lembaga dalam satu layar untuk membantu pengambilan keputusan.</p>
+            </div>
+            <div class="executive-toolbar">
+              <label class="executive-year-select">
+                <span>Tahun</span>
+                <select id="executiveYear"></select>
+              </label>
+              <button id="refreshExecutiveBtn" class="brand-btn" type="button">↻ Perbarui</button>
+            </div>
+          </div>
+
+          <div id="executivePriorityAlert" class="executive-priority hidden"></div>
+
+          <div class="executive-kpi-grid">
+            <article class="executive-kpi">
+              <div class="executive-kpi-icon">Rp</div>
+              <div>
+                <span>Total Saldo Konsolidasi</span>
+                <strong id="execTotalBalance">Rp0</strong>
+                <small>Kas dan bank seluruh lembaga</small>
+              </div>
+            </article>
+
+            <article class="executive-kpi">
+              <div class="executive-kpi-icon">↕</div>
+              <div>
+                <span>Arus Bersih Tahun Berjalan</span>
+                <strong id="execNetCashflow">Rp0</strong>
+                <small id="execNetCashflowMeta">Pemasukan − pengeluaran</small>
+              </div>
+            </article>
+
+            <article class="executive-kpi">
+              <div class="executive-kpi-icon">✓</div>
+              <div>
+                <span>Menunggu Approval</span>
+                <strong id="execPendingCount">0</strong>
+                <small id="execPendingMeta">Transaksi SUBMITTED</small>
+              </div>
+            </article>
+
+            <article class="executive-kpi">
+              <div class="executive-kpi-icon">%</div>
+              <div>
+                <span>Serapan Anggaran</span>
+                <strong id="execBudgetAbsorption">0%</strong>
+                <small id="execBudgetMeta">Realisasi terhadap anggaran</small>
+              </div>
+            </article>
+          </div>
+
+          <div class="executive-grid executive-grid-top">
+            <article class="panel executive-wide">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Kesehatan Keuangan per Lembaga</h3>
+                  <p>Saldo, arus bersih, serapan anggaran, dan transaksi pending.</p>
+                </div>
+                <span class="executive-legend">● Sehat &nbsp; ● Waspada &nbsp; ● Perlu Perhatian</span>
+              </div>
+              <div id="executiveInstitutionCards" class="executive-institution-grid">
+                <div class="empty">Memuat...</div>
+              </div>
+            </article>
+          </div>
+
+          <div class="executive-grid">
+            <article class="panel executive-wide">
+              <div class="panel-title">
+                <h3>Saldo per Lembaga</h3>
+                <p>Posisi kas dan rekening bank saat ini</p>
+              </div>
+              <div class="executive-chart"><canvas id="executiveBalanceChart"></canvas></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-title">
+                <h3>Status Tutup Buku</h3>
+                <p id="execClosingSubtitle">Periode bulan sebelumnya</p>
+              </div>
+              <div id="executiveClosingList" class="executive-closing-list">
+                <div class="empty">Memuat...</div>
+              </div>
+            </article>
+          </div>
+
+          <div class="executive-grid">
+            <article class="panel executive-wide">
+              <div class="panel-title">
+                <h3>Pemasukan vs Pengeluaran</h3>
+                <p id="execFlowSubtitle">Per lembaga pada tahun berjalan</p>
+              </div>
+              <div class="executive-chart"><canvas id="executiveFlowChart"></canvas></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Anggaran Kritis</h3>
+                  <p>Kategori dengan serapan ≥80%</p>
+                </div>
+                <button class="executive-link-btn" data-exec-nav="anggaran" type="button">Buka Anggaran</button>
+              </div>
+              <div id="executiveBudgetAlerts" class="executive-alert-list">
+                <div class="empty">Memuat...</div>
+              </div>
+            </article>
+          </div>
+
+          <div class="executive-grid">
+            <article class="panel executive-wide">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Menunggu Persetujuan</h3>
+                  <p>Transaksi SUBMITTED yang perlu perhatian Yayasan.</p>
+                </div>
+                <button class="executive-link-btn" data-exec-nav="bukti" type="button">Buka Approval Center</button>
+              </div>
+
+              <div class="table-wrap">
+                <table class="income-table executive-pending-table">
+                  <thead>
+                    <tr>
+                      <th>Usia</th>
+                      <th>No. Transaksi</th>
+                      <th>Lembaga</th>
+                      <th>Jenis</th>
+                      <th>Nominal</th>
+                      <th>Tanggal</th>
+                    </tr>
+                  </thead>
+                  <tbody id="executivePendingBody">
+                    <tr><td colspan="6" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-title">
+                <h3>Fokus Pimpinan</h3>
+                <p>Prioritas yang perlu ditindaklanjuti.</p>
+              </div>
+              <div id="executiveFocusList" class="executive-focus-list">
+                <div class="empty">Memuat...</div>
+              </div>
+            </article>
           </div>
         </div>
 
