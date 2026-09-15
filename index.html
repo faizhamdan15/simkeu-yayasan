@@ -74,12 +74,12 @@
         <button class="nav active" data-view="dashboard">▦ Dashboard</button>
         <button class="nav" data-view="pemasukan">↓ Pemasukan</button>
         <button class="nav" data-view="pengeluaran">↑ Pengeluaran</button>
-        <button class="nav" data-view="transfer">⇄ Transfer Internal</button>
+        <button id="navTransfer" class="nav" data-view="transfer">⇄ Transfer Internal</button>
         <button class="nav" data-view="bukti">▤ Bukti Transaksi</button>
-        <button class="nav" data-view="lembaga">▣ Lembaga</button>
+        <button id="navInstitutions" class="nav central-nav" data-view="lembaga">▣ Lembaga</button>
         <button class="nav" data-view="laporan">▥ Laporan</button>
         <button class="nav" data-view="analitik">⌁ Analitik</button>
-        <button class="nav" data-view="pengguna">♙ Pengguna</button>
+        <button id="navUsers" class="nav central-nav" data-view="pengguna">♙ Pengguna</button>
       </nav>
 
       <div class="sidebar-bottom">
@@ -113,9 +113,9 @@
           <div class="dashboard-brandbar">
             <img src="logo-yayasan.jpeg" alt="Logo Yayasan Ar-Raudlah">
             <div>
-              <span>SISTEM INFORMASI MANAJEMEN KEUANGAN</span>
-              <strong>SIMKEU YAYASAN AR-RAUDLAH KAPEDI</strong>
-              <small>Keuangan Yayasan dan seluruh lembaga dalam satu sistem terintegrasi</small>
+              <span id="dashboardBrandKicker">SISTEM INFORMASI MANAJEMEN KEUANGAN</span>
+              <strong id="dashboardBrandTitle">SIMKEU YAYASAN AR-RAUDLAH KAPEDI</strong>
+              <small id="dashboardBrandSubtitle">Keuangan Yayasan dan seluruh lembaga dalam satu sistem terintegrasi</small>
             </div>
           </div>
           <div class="welcome">

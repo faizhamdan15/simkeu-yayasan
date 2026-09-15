@@ -636,3 +636,31 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
   padding-top:12px;
   padding-bottom:6px;
 }
+
+
+/* =========================================================
+   ROLE-BASED UI v6.2
+   ========================================================= */
+.role-hidden{display:none!important}
+.institution-mode .dashboard-brandbar{
+  border-color:#34291E;
+}
+.institution-mode .dashboard-brandbar strong{
+  letter-spacing:.01em;
+}
+.institution-mode #welcomeInstitution{
+  font-weight:750;
+  color:#786B60;
+}
+.institution-mode .sidebar-head::after{
+  content:"PORTAL LEMBAGA";
+  display:inline-flex;
+  margin-top:7px;
+  padding:3px 7px;
+  border-radius:999px;
+  background:rgba(248,153,33,.13);
+  color:#F89921;
+  font-size:7px;
+  letter-spacing:.11em;
+  font-weight:900;
+}

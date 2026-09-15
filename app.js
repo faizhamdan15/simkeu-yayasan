@@ -117,6 +117,7 @@ async function enterApp(session){
       : "Lembaga: "+(p.institutions?.name||"-");
     $("today").textContent=new Intl.DateTimeFormat("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(new Date());
 
+    applyRoleBasedUI();
     await loadDashboard();
   }catch(err){
     console.error(err);
@@ -1124,8 +1125,13 @@ async function loadReportModule(){
         .order("name");
       if(error) throw error;
       reportInstitutions=data||[];
-      $("reportInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
-        reportInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+      if(isCentralUser()){
+        $("reportInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
+          reportInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+        $("reportInstitution").disabled=false;
+      }else{
+        restrictInstitutionSelector("reportInstitution",reportInstitutions);
+      }
     }
 
     await fetchReportTransactions();
@@ -1345,8 +1351,13 @@ async function loadAnalyticsModule(){
         .order("name");
       if(error) throw error;
       analyticsInstitutions=data||[];
-      $("analyticsInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
-        analyticsInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+      if(isCentralUser()){
+        $("analyticsInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
+          analyticsInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+        $("analyticsInstitution").disabled=false;
+      }else{
+        restrictInstitutionSelector("analyticsInstitution",analyticsInstitutions);
+      }
     }
 
     await fetchAnalyticsData();
@@ -1680,6 +1691,59 @@ async function saveUserProfile(){
   toast("Pengguna berhasil dihubungkan ke SIMKEU.");
 }
 
+
+/* =========================================================
+   ROLE-BASED UI / DASHBOARD KHUSUS LEMBAGA v6.2
+   ========================================================= */
+function institutionDisplayName(){
+  return currentProfile?.institutions?.name || "Lembaga";
+}
+
+function applyRoleBasedUI(){
+  const central=isCentralUser();
+  const institutionName=institutionDisplayName();
+
+  document.body.classList.toggle("institution-mode",!central);
+
+  // Menu khusus pusat.
+  ["navInstitutions","navUsers"].forEach(id=>{
+    const el=$(id);
+    if(el) el.classList.toggle("role-hidden",!central);
+  });
+
+  // Transfer tetap dapat dilihat lembaga sebagai riwayat transfer masuk/keluar,
+  // tetapi lembaga tidak dapat membuat transfer baru (sudah dibatasi di modul transfer).
+  if($("navTransfer")){
+    $("navTransfer").textContent=central ? "⇄ Transfer Internal" : "⇄ Transfer Masuk/Keluar";
+  }
+
+  // Branding dashboard.
+  if(central){
+    $("dashboardBrandKicker").textContent="SISTEM INFORMASI MANAJEMEN KEUANGAN";
+    $("dashboardBrandTitle").textContent="SIMKEU YAYASAN AR-RAUDLAH KAPEDI";
+    $("dashboardBrandSubtitle").textContent="Keuangan Yayasan dan seluruh lembaga dalam satu sistem terintegrasi";
+  }else{
+    $("dashboardBrandKicker").textContent="SISTEM INFORMASI KEUANGAN LEMBAGA";
+    $("dashboardBrandTitle").textContent=`SIMKEU ${institutionName.toUpperCase()} AR-RAUDLAH KAPEDI`;
+    $("dashboardBrandSubtitle").textContent=`Pengelolaan keuangan ${institutionName} yang terintegrasi dengan Yayasan Ar-Raudlah Kapedi`;
+  }
+}
+
+function restrictInstitutionSelector(selectId, institutions){
+  const select=$(selectId);
+  if(!select || isCentralUser()) return institutions;
+
+  const ownId=currentProfile?.institution_id;
+  const own=institutions.filter(i=>i.id===ownId);
+
+  if(own.length){
+    select.innerHTML=own.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+    select.value=ownId;
+    select.disabled=true;
+  }
+  return own;
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -1736,9 +1800,24 @@ const meta={
 };
 
 async function switchView(v){
+  // Halaman pusat tidak boleh dibuka dari akun lembaga meskipun dipanggil manual.
+  if(!isCentralUser() && ["lembaga","pengguna"].includes(v)){
+    toast("Menu ini hanya tersedia untuk akun Yayasan.");
+    v="dashboard";
+  }
+
   document.querySelectorAll(".nav").forEach(b=>b.classList.toggle("active",b.dataset.view===v));
-  $("pageTitle").textContent=meta[v][0];
-  $("pageSubtitle").textContent=meta[v][1];
+
+  if(v==="transfer" && !isCentralUser()){
+    $("pageTitle").textContent="Transfer Masuk/Keluar";
+    $("pageSubtitle").textContent="Riwayat perpindahan dana yang berkaitan dengan lembaga";
+  }else if(v==="dashboard" && !isCentralUser()){
+    $("pageTitle").textContent="Dashboard";
+    $("pageSubtitle").textContent=`SIMKEU ${institutionDisplayName()} Ar-Raudlah Kapedi`;
+  }else{
+    $("pageTitle").textContent=meta[v][0];
+    $("pageSubtitle").textContent=meta[v][1];
+  }
 
   $("dashboardSection").classList.toggle("hidden",v!=="dashboard");
   $("incomeSection").classList.toggle("hidden",v!=="pemasukan");
