@@ -45,6 +45,10 @@ let evidenceRowsCache = [];
 let currentEvidenceExternalUrl = null;
 let evidenceThumbGeneration = 0;
 
+let auditInstitutions = [];
+let auditProfiles = [];
+let auditRowsCache = [];
+
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
 }).format(Number(n||0));
@@ -1711,7 +1715,7 @@ function applyRoleBasedUI(){
   document.body.classList.toggle("institution-mode",!central);
 
   // Menu khusus pusat.
-  ["navInstitutions","navUsers"].forEach(id=>{
+  ["navInstitutions","navUsers","navAudit"].forEach(id=>{
     const el=$(id);
     if(el) el.classList.toggle("role-hidden",!central);
   });
@@ -2071,6 +2075,386 @@ async function rejectFromEvidence(transactionId){
   toast("Transaksi ditolak.");
 }
 
+
+/* =========================================================
+   AUDIT TRAIL + AKTIVITAS SISTEM v6.4
+   ========================================================= */
+
+const AUDIT_ACTION_LABELS={
+  TRANSACTION_CREATED:"Transaksi dibuat",
+  TRANSACTION_UPDATED:"Transaksi diperbarui",
+  TRANSACTION_SUBMITTED:"Transaksi diajukan",
+  TRANSACTION_APPROVED:"Transaksi disetujui",
+  TRANSACTION_REJECTED:"Transaksi ditolak",
+  TRANSACTION_VOIDED:"Transaksi dibatalkan",
+  TRANSACTION_DELETED:"Transaksi dihapus",
+  PROOF_UPLOADED:"Bukti diunggah",
+  PROOF_DELETED:"Bukti dihapus",
+  USER_PROFILE_CREATED:"Profil pengguna dibuat",
+  USER_PROFILE_UPDATED:"Profil pengguna diubah",
+  ACCOUNT_CREATED:"Akun keuangan dibuat",
+  ACCOUNT_UPDATED:"Akun keuangan diubah",
+  APPROVAL_RECORDED:"Approval dicatat"
+};
+
+function auditActionLabel(action){
+  return AUDIT_ACTION_LABELS[action]||String(action||"Aktivitas").replaceAll("_"," ");
+}
+
+function auditCategory(action){
+  const a=String(action||"");
+  if(a.startsWith("PROOF_")) return "PROOF";
+  if(a.startsWith("USER_")) return "USER";
+  if(a.startsWith("ACCOUNT_")) return "ACCOUNT";
+  if(a.includes("SUBMITTED")||a.includes("APPROVED")||a.includes("REJECTED")||a.includes("VOIDED")||a.startsWith("APPROVAL_")) return "APPROVAL";
+  if(a.startsWith("TRANSACTION_")) return "TRANSACTION";
+  return "TRANSACTION";
+}
+
+function auditVisual(action){
+  const a=String(action||"");
+  if(a.includes("APPROVED")) return {icon:"✓",cls:"approval"};
+  if(a.includes("REJECTED")||a.includes("DELETED")||a.includes("VOIDED")) return {icon:"!",cls:"reject"};
+  if(a.startsWith("PROOF_")) return {icon:"▤",cls:"proof"};
+  if(a.startsWith("USER_")) return {icon:"♙",cls:"user"};
+  if(a.startsWith("ACCOUNT_")) return {icon:"▣",cls:"account"};
+  if(a.includes("SUBMITTED")) return {icon:"→",cls:"approval"};
+  return {icon:"◷",cls:""};
+}
+
+function auditProfileName(userId){
+  if(!userId) return "Sistem";
+  return auditProfiles.find(p=>p.id===userId)?.full_name||"Pengguna";
+}
+
+function auditInstitutionName(id){
+  if(!id) return "—";
+  return auditInstitutions.find(i=>i.id===id)?.name||"Lembaga";
+}
+
+function auditTargetTitle(row){
+  const d=row.details||{};
+  if(row.table_name==="transactions"){
+    return d.transaction_number || `Transaksi ${String(row.record_id||"").slice(0,8)}`;
+  }
+  if(row.table_name==="transaction_attachments"){
+    return d.file_name || "Bukti transaksi";
+  }
+  if(row.table_name==="profiles"){
+    return d.full_name || "Profil pengguna";
+  }
+  if(row.table_name==="accounts"){
+    return d.account_name || "Akun keuangan";
+  }
+  return `${row.table_name||"Data"} ${String(row.record_id||"").slice(0,8)}`;
+}
+
+function auditDescription(row){
+  const d=row.details||{};
+  const action=row.action;
+
+  if(action==="TRANSACTION_CREATED"){
+    return `${typeLabel(d.transaction_type||"")} ${rupiah(Number(d.amount||0))}${d.description?` • ${d.description}`:""}`;
+  }
+  if(action==="TRANSACTION_SUBMITTED"){
+    return `${d.transaction_number||"Transaksi"} diajukan untuk pemeriksaan Yayasan.`;
+  }
+  if(action==="TRANSACTION_APPROVED"){
+    return `${d.transaction_number||"Transaksi"} disetujui${d.amount?` sebesar ${rupiah(Number(d.amount))}`:""}.`;
+  }
+  if(action==="TRANSACTION_REJECTED"){
+    return `${d.transaction_number||"Transaksi"} ditolak${d.rejection_note?` • ${d.rejection_note}`:""}.`;
+  }
+  if(action==="TRANSACTION_VOIDED"){
+    return `${d.transaction_number||"Transaksi"} dibatalkan/VOID.`;
+  }
+  if(action==="TRANSACTION_UPDATED"){
+    const changes=[];
+    if(d.old_amount!=null && d.new_amount!=null && Number(d.old_amount)!==Number(d.new_amount)){
+      changes.push(`nominal ${rupiah(Number(d.old_amount))} → ${rupiah(Number(d.new_amount))}`);
+    }
+    if(d.old_description!==d.new_description && (d.old_description!=null||d.new_description!=null)){
+      changes.push("keterangan diperbarui");
+    }
+    return changes.length?changes.join(" • "):"Data transaksi diperbarui.";
+  }
+  if(action==="PROOF_UPLOADED"){
+    return `${d.file_name||"Dokumen"} ditambahkan sebagai bukti transaksi${d.transaction_number?` ${d.transaction_number}`:""}.`;
+  }
+  if(action==="PROOF_DELETED"){
+    return `${d.file_name||"Dokumen"} dihapus dari bukti transaksi.`;
+  }
+  if(action==="USER_PROFILE_CREATED"){
+    return `${d.full_name||"Pengguna"} dihubungkan sebagai ${roleLabel(d.role||"")}${d.institution_name?` • ${d.institution_name}`:""}.`;
+  }
+  if(action==="USER_PROFILE_UPDATED"){
+    const x=[];
+    if(d.old_role!==d.new_role) x.push(`role ${roleLabel(d.old_role||"")} → ${roleLabel(d.new_role||"")}`);
+    if(d.old_institution_id!==d.new_institution_id) x.push("lembaga diubah");
+    if(d.old_is_active!==d.new_is_active) x.push(`status ${d.new_is_active?"aktif":"nonaktif"}`);
+    return x.length?x.join(" • "):"Profil pengguna diperbarui.";
+  }
+  if(action==="ACCOUNT_CREATED"){
+    return `${d.account_name||"Akun"} dibuat${d.account_type?` • ${d.account_type}`:""}.`;
+  }
+  if(action==="ACCOUNT_UPDATED"){
+    return `${d.account_name||"Akun"} diperbarui.`;
+  }
+  if(action==="APPROVAL_RECORDED"){
+    return `${d.approval_action||"Approval"}${d.note?` • ${d.note}`:""}`;
+  }
+  return "Aktivitas sistem tercatat.";
+}
+
+function auditLocalDateTime(value){
+  if(!value) return "—";
+  return new Intl.DateTimeFormat("id-ID",{
+    day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"
+  }).format(new Date(value));
+}
+
+function auditTimeOnly(value){
+  if(!value) return "—";
+  return new Intl.DateTimeFormat("id-ID",{hour:"2-digit",minute:"2-digit"}).format(new Date(value));
+}
+
+async function loadAuditModule(){
+  if(!isCentralUser()){
+    toast("Audit Trail hanya tersedia untuk akun Yayasan.");
+    await switchView("dashboard");
+    return;
+  }
+
+  try{
+    if(!$("auditDateFrom").value) $("auditDateFrom").value=firstDayOfCurrentMonth();
+    if(!$("auditDateTo").value) $("auditDateTo").value=todayISO();
+
+    if(!auditInstitutions.length || !auditProfiles.length){
+      const [instRes,profileRes]=await Promise.all([
+        sb.from("institutions").select("id,name,code").order("name"),
+        sb.from("profiles").select("id,full_name,role,institution_id,is_active").order("full_name")
+      ]);
+      if(instRes.error) throw instRes.error;
+      if(profileRes.error) throw profileRes.error;
+
+      auditInstitutions=instRes.data||[];
+      auditProfiles=profileRes.data||[];
+
+      $("auditInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
+        auditInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+
+      $("auditActor").innerHTML=`<option value="ALL">Semua Pengguna</option>`+
+        auditProfiles.map(p=>`<option value="${p.id}">${escapeHtml(p.full_name||"Pengguna")}</option>`).join("");
+    }
+
+    await fetchAuditLogs();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat Audit Trail: "+(err.message||"error"));
+  }
+}
+
+async function fetchAuditLogs(){
+  const from=$("auditDateFrom").value;
+  const to=$("auditDateTo").value;
+  if(!from||!to) throw new Error("Tanggal awal dan akhir wajib diisi.");
+  if(from>to) throw new Error("Tanggal awal tidak boleh melewati tanggal akhir.");
+
+  $("auditTimeline").innerHTML=`<div class="empty">Memuat audit trail...</div>`;
+
+  const startDate=new Date(`${from}T00:00:00`);
+  const start=startDate.toISOString();
+  const endDate=new Date(`${to}T00:00:00`);
+  endDate.setDate(endDate.getDate()+1);
+  const end=endDate.toISOString();
+
+  const {data,error}=await sb.from("audit_logs")
+    .select("id,user_id,institution_id,action,table_name,record_id,details,created_at")
+    .gte("created_at",start)
+    .lt("created_at",end)
+    .order("created_at",{ascending:false})
+    .limit(1000);
+
+  if(error) throw error;
+  auditRowsCache=data||[];
+  renderAuditTrail();
+}
+
+function getFilteredAuditRows(){
+  const institution=$("auditInstitution").value;
+  const actor=$("auditActor").value;
+  const category=$("auditAction").value;
+  const q=($("auditSearch").value||"").trim().toLowerCase();
+
+  return auditRowsCache.filter(r=>{
+    const target=auditTargetTitle(r);
+    const actorName=auditProfileName(r.user_id);
+    const instName=auditInstitutionName(r.institution_id);
+    const desc=auditDescription(r);
+    const hay=[r.action,r.table_name,target,actorName,instName,desc,JSON.stringify(r.details||{})].join(" ").toLowerCase();
+
+    return (institution==="ALL" || r.institution_id===institution) &&
+      (actor==="ALL" || r.user_id===actor) &&
+      (category==="ALL" || auditCategory(r.action)===category) &&
+      (!q || hay.includes(q));
+  });
+}
+
+function renderAuditTrail(){
+  const rows=getFilteredAuditRows();
+  const today=todayISO();
+  const localDateKey=value=>{
+    const d=new Date(value);
+    const y=d.getFullYear();
+    const m=String(d.getMonth()+1).padStart(2,"0");
+    const day=String(d.getDate()).padStart(2,"0");
+    return `${y}-${m}-${day}`;
+  };
+  const todayRows=auditRowsCache.filter(r=>r.created_at && localDateKey(r.created_at)===today);
+
+  $("auditTodayCount").textContent=todayRows.length;
+  $("auditApprovalCount").textContent=todayRows.filter(r=>r.action==="TRANSACTION_APPROVED").length;
+  $("auditProofCount").textContent=rows.filter(r=>r.action==="PROOF_UPLOADED").length;
+  $("auditActorCount").textContent=new Set(rows.map(r=>r.user_id).filter(Boolean)).size;
+  $("auditResultInfo").textContent=`${rows.length} aktivitas • ${formatDate($("auditDateFrom").value)} s.d. ${formatDate($("auditDateTo").value)}`;
+
+  $("auditTimeline").innerHTML=rows.length?rows.map(r=>{
+    const visual=auditVisual(r.action);
+    return `
+      <div class="audit-event">
+        <div class="audit-icon ${visual.cls}">${visual.icon}</div>
+        <div class="audit-event-main">
+          <div class="audit-event-top">
+            <strong>${escapeHtml(auditProfileName(r.user_id))}</strong>
+            <span class="audit-action-chip ${visual.cls}">${escapeHtml(auditActionLabel(r.action))}</span>
+          </div>
+          <div class="audit-event-title">${escapeHtml(auditTargetTitle(r))}</div>
+          <div class="audit-event-desc">${escapeHtml(auditDescription(r))}</div>
+          <div class="audit-event-meta">
+            <span>▣ ${escapeHtml(auditInstitutionName(r.institution_id))}</span>
+            <span>▤ ${escapeHtml(r.table_name||"-")}</span>
+            <span>${auditLocalDateTime(r.created_at)}</span>
+          </div>
+        </div>
+        <div class="audit-event-right">
+          <span class="audit-time">${auditTimeOnly(r.created_at)}</span>
+          <button class="audit-detail-btn" data-audit-detail="${r.id}" type="button">Detail</button>
+        </div>
+      </div>`;
+  }).join(""):`<div class="empty">Belum ada aktivitas pada filter ini.</div>`;
+
+  renderAuditSummary(rows);
+}
+
+function renderAuditSummary(rows){
+  const groups=[
+    ["TRANSACTION","Transaksi"],
+    ["APPROVAL","Submit / Approval"],
+    ["PROOF","Bukti Transaksi"],
+    ["USER","Pengguna"],
+    ["ACCOUNT","Akun Keuangan"]
+  ];
+  const total=rows.length||1;
+
+  $("auditSummaryList").innerHTML=groups.map(([key,label])=>{
+    const count=rows.filter(r=>auditCategory(r.action)===key).length;
+    const pct=Math.round(count/total*100);
+    return `<div class="audit-summary-item">
+      <div class="audit-summary-top"><strong>${label}</strong><span>${count}</span></div>
+      <div class="audit-progress"><i style="width:${pct}%"></i></div>
+    </div>`;
+  }).join("");
+}
+
+function showAuditDetail(id){
+  const row=auditRowsCache.find(r=>String(r.id)===String(id));
+  if(!row) return;
+
+  $("auditModalTitle").textContent=auditActionLabel(row.action);
+  $("auditModalMeta").textContent=auditLocalDateTime(row.created_at);
+
+  const d=row.details||{};
+  const detailPairs=[
+    ["Pelaku",auditProfileName(row.user_id)],
+    ["Lembaga",auditInstitutionName(row.institution_id)],
+    ["Target",auditTargetTitle(row)],
+    ["Tabel",row.table_name||"—"],
+    ["Record ID",row.record_id||"—"],
+    ["Aksi",row.action||"—"]
+  ];
+
+  const changes=[];
+  const readableKeys=[
+    ["transaction_number","Nomor transaksi"],
+    ["transaction_type","Jenis transaksi"],
+    ["amount","Nominal"],
+    ["old_status","Status sebelumnya"],
+    ["new_status","Status baru"],
+    ["file_name","Nama file"],
+    ["full_name","Nama pengguna"],
+    ["role","Role"],
+    ["old_role","Role sebelumnya"],
+    ["new_role","Role baru"],
+    ["account_name","Nama akun"],
+    ["note","Catatan"],
+    ["rejection_note","Alasan penolakan"]
+  ];
+
+  readableKeys.forEach(([key,label])=>{
+    if(d[key]!==undefined && d[key]!==null && d[key]!==""){
+      let val=d[key];
+      if(key==="amount") val=rupiah(Number(val||0));
+      if(key==="role"||key==="old_role"||key==="new_role") val=roleLabel(val);
+      changes.push(`<div class="audit-change-row"><span>${label}</span><strong>${escapeHtml(String(val))}</strong></div>`);
+    }
+  });
+
+  $("auditModalBody").innerHTML=`
+    <div class="audit-detail-grid">
+      ${detailPairs.map(([k,v])=>`<div class="audit-detail-box"><span>${k}</span><strong>${escapeHtml(String(v))}</strong></div>`).join("")}
+    </div>
+    ${changes.length?`<div class="audit-change-list">${changes.join("")}</div>`:""}
+    <pre class="audit-json">${escapeHtml(JSON.stringify(d,null,2))}</pre>
+  `;
+
+  $("auditDetailModal").classList.remove("hidden");
+  $("auditDetailModal").setAttribute("aria-hidden","false");
+}
+
+function closeAuditDetail(){
+  $("auditDetailModal").classList.add("hidden");
+  $("auditDetailModal").setAttribute("aria-hidden","true");
+}
+
+function exportAuditCsv(){
+  const rows=getFilteredAuditRows();
+  if(!rows.length){toast("Tidak ada audit trail untuk diekspor.");return}
+
+  const header=["Waktu","Pengguna","Lembaga","Aksi","Target","Tabel","Record ID","Keterangan"];
+  const body=rows.map(r=>[
+    auditLocalDateTime(r.created_at),
+    auditProfileName(r.user_id),
+    auditInstitutionName(r.institution_id),
+    auditActionLabel(r.action),
+    auditTargetTitle(r),
+    r.table_name||"",
+    r.record_id||"",
+    auditDescription(r)
+  ]);
+
+  const csv="\uFEFF"+[header,...body].map(x=>x.map(csvCell).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`Audit_SIMKEU_${$("auditDateFrom").value}_${$("auditDateTo").value}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast("Audit Trail berhasil diekspor.");
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -2104,6 +2488,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   const evidenceVisible=!$("evidenceSection").classList.contains("hidden");
   const reportVisible=!$("reportSection").classList.contains("hidden");
   const analyticsVisible=!$("analyticsSection").classList.contains("hidden");
+  const auditVisible=!$("auditSection").classList.contains("hidden");
 
   if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
   else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
@@ -2111,6 +2496,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   else if(evidenceVisible) await Promise.all([loadDashboard(),fetchEvidenceTransactions()]);
   else if(reportVisible) await Promise.all([loadDashboard(),fetchReportTransactions()]);
   else if(analyticsVisible) await Promise.all([loadDashboard(),fetchAnalyticsData()]);
+  else if(auditVisible) await Promise.all([loadDashboard(),fetchAuditLogs()]);
   else await loadDashboard();
 
   toast("Data diperbarui.");
@@ -2125,12 +2511,13 @@ const meta={
   lembaga:["Lembaga","Kelola unit di bawah Yayasan"],
   laporan:["Laporan","Rekap keuangan dan ekspor"],
   analitik:["Analitik","Diagram, tren, dan persentase"],
-  pengguna:["Pengguna","Kelola akun dan hak akses"]
+  pengguna:["Pengguna","Kelola akun dan hak akses"],
+  audit:["Audit Trail","Riwayat aktivitas dan perubahan sistem"]
 };
 
 async function switchView(v){
   // Halaman pusat tidak boleh dibuka dari akun lembaga meskipun dipanggil manual.
-  if(!isCentralUser() && ["lembaga","pengguna"].includes(v)){
+  if(!isCentralUser() && ["lembaga","pengguna","audit"].includes(v)){
     toast("Menu ini hanya tersedia untuk akun Yayasan.");
     v="dashboard";
   }
@@ -2157,9 +2544,10 @@ async function switchView(v){
   $("analyticsSection").classList.toggle("hidden",v!=="analitik");
   $("institutionsSection").classList.toggle("hidden",v!=="lembaga");
   $("usersSection").classList.toggle("hidden",v!=="pengguna");
+  $("auditSection").classList.toggle("hidden",v!=="audit");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","analitik","lembaga","pengguna"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","analitik","lembaga","pengguna","audit"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -2178,6 +2566,8 @@ async function switchView(v){
     await loadInstitutionsModule();
   }else if(v==="pengguna"){
     await loadUsersModule();
+  }else if(v==="audit"){
+    await loadAuditModule();
   }else if(v!=="dashboard"){
     $("placeholderTitle").textContent=meta[v][0];
   }
@@ -2248,6 +2638,40 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
 
 
 
+
+
+/* Audit Trail events */
+["auditInstitution","auditActor","auditAction"].forEach(id=>{
+  $(id).addEventListener("change",renderAuditTrail);
+});
+$("auditSearch").addEventListener("input",renderAuditTrail);
+
+$("auditDateFrom").addEventListener("change",async()=>{
+  try{await fetchAuditLogs()}catch(err){console.error(err);toast("Gagal memuat Audit Trail: "+(err.message||"error"))}
+});
+$("auditDateTo").addEventListener("change",async()=>{
+  try{await fetchAuditLogs()}catch(err){console.error(err);toast("Gagal memuat Audit Trail: "+(err.message||"error"))}
+});
+
+$("refreshAuditBtn").addEventListener("click",async()=>{
+  try{
+    await fetchAuditLogs();
+    toast("Audit Trail diperbarui.");
+  }catch(err){
+    console.error(err);toast("Gagal memperbarui Audit Trail: "+(err.message||"error"));
+  }
+});
+
+$("exportAuditCsvBtn").addEventListener("click",exportAuditCsv);
+
+$("auditTimeline").addEventListener("click",e=>{
+  const btn=e.target.closest("[data-audit-detail]");
+  if(btn) showAuditDetail(btn.dataset.auditDetail);
+});
+
+$("closeAuditModal").addEventListener("click",closeAuditDetail);
+$("closeAuditModalBtn").addEventListener("click",closeAuditDetail);
+document.querySelector(".audit-modal-backdrop").addEventListener("click",closeAuditDetail);
 
 /* Evidence center events */
 ["evidenceInstitution","evidenceStatus","evidenceProofStatus"].forEach(id=>{

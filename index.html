@@ -80,6 +80,7 @@
         <button class="nav" data-view="laporan">▥ Laporan</button>
         <button class="nav" data-view="analitik">⌁ Analitik</button>
         <button id="navUsers" class="nav central-nav" data-view="pengguna">♙ Pengguna</button>
+        <button id="navAudit" class="nav central-nav" data-view="audit">◷ Audit Trail</button>
       </nav>
 
       <div class="sidebar-bottom">
@@ -1035,6 +1036,139 @@
             <div class="evidence-modal-actions">
               <button id="openEvidenceExternalBtn" class="secondary-btn" type="button">Buka File</button>
               <button id="closeEvidenceModalBtn" class="brand-btn" type="button">Tutup</button>
+            </div>
+          </div>
+        </div>
+
+
+        <div id="auditSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">KETERTELUSURAN SISTEM</span>
+              <h1>Audit Trail</h1>
+              <p>Riwayat aktivitas penting SIMKEU: transaksi, approval, bukti, pengguna, dan akun.</p>
+            </div>
+            <div class="module-actions">
+              <button id="exportAuditCsvBtn" class="secondary-btn report-top-btn" type="button">↓ Export CSV</button>
+              <button id="refreshAuditBtn" class="brand-btn report-top-btn" type="button">↻ Perbarui</button>
+            </div>
+          </div>
+
+          <div class="audit-security-note">
+            <div class="audit-lock">🔒</div>
+            <div>
+              <strong>Log audit bersifat read-only</strong>
+              <span>Menu ini hanya tersedia bagi akun pusat. Catatan dibuat otomatis oleh database dan tidak dapat diedit dari aplikasi.</span>
+            </div>
+          </div>
+
+          <div class="module-stats report-stats">
+            <article class="mini-stat">
+              <span>Aktivitas Hari Ini</span>
+              <strong id="auditTodayCount">0</strong>
+              <small>Semua kejadian tercatat</small>
+            </article>
+            <article class="mini-stat">
+              <span>Approval Hari Ini</span>
+              <strong id="auditApprovalCount">0</strong>
+              <small>Transaksi disetujui</small>
+            </article>
+            <article class="mini-stat">
+              <span>Bukti Diunggah</span>
+              <strong id="auditProofCount">0</strong>
+              <small>Pada periode terpilih</small>
+            </article>
+            <article class="mini-stat">
+              <span>Pelaku Aktif</span>
+              <strong id="auditActorCount">0</strong>
+              <small>Pengguna unik pada periode</small>
+            </article>
+          </div>
+
+          <article class="panel audit-filter-panel">
+            <div class="audit-filter-grid">
+              <label class="form-field">
+                <span>Dari Tanggal</span>
+                <input id="auditDateFrom" type="date">
+              </label>
+
+              <label class="form-field">
+                <span>Sampai Tanggal</span>
+                <input id="auditDateTo" type="date">
+              </label>
+
+              <label class="form-field">
+                <span>Lembaga</span>
+                <select id="auditInstitution">
+                  <option value="ALL">Semua Lembaga</option>
+                </select>
+              </label>
+
+              <label class="form-field">
+                <span>Pengguna</span>
+                <select id="auditActor">
+                  <option value="ALL">Semua Pengguna</option>
+                </select>
+              </label>
+
+              <label class="form-field">
+                <span>Jenis Aktivitas</span>
+                <select id="auditAction">
+                  <option value="ALL">Semua Aktivitas</option>
+                  <option value="TRANSACTION">Transaksi</option>
+                  <option value="APPROVAL">Submit / Approval</option>
+                  <option value="PROOF">Bukti Transaksi</option>
+                  <option value="USER">Pengguna</option>
+                  <option value="ACCOUNT">Akun Keuangan</option>
+                </select>
+              </label>
+
+              <label class="form-field audit-search-field">
+                <span>Pencarian</span>
+                <input id="auditSearch" type="search" placeholder="Nomor transaksi, nama, aksi...">
+              </label>
+            </div>
+          </article>
+
+          <div class="audit-layout">
+            <article class="panel">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Aktivitas Sistem</h3>
+                  <p id="auditResultInfo">Memuat audit trail...</p>
+                </div>
+              </div>
+
+              <div id="auditTimeline" class="audit-timeline">
+                <div class="empty">Memuat...</div>
+              </div>
+            </article>
+
+            <article class="panel audit-side-panel">
+              <div class="panel-title">
+                <h3>Ringkasan Periode</h3>
+                <p>Distribusi kejadian berdasarkan jenis aktivitas.</p>
+              </div>
+              <div id="auditSummaryList" class="audit-summary-list">
+                <div class="empty">Memuat...</div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div id="auditDetailModal" class="evidence-modal hidden" aria-hidden="true">
+          <div class="evidence-modal-backdrop audit-modal-backdrop"></div>
+          <div class="evidence-modal-card audit-modal-card">
+            <div class="evidence-modal-head">
+              <div>
+                <strong id="auditModalTitle">Detail Aktivitas</strong>
+                <span id="auditModalMeta">—</span>
+              </div>
+              <button id="closeAuditModal" class="modal-close-btn" type="button">×</button>
+            </div>
+            <div id="auditModalBody" class="audit-modal-body"></div>
+            <div class="evidence-modal-actions">
+              <button id="closeAuditModalBtn" class="brand-btn" type="button">Tutup</button>
             </div>
           </div>
         </div>
