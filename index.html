@@ -929,6 +929,116 @@
           </div>
         </div>
 
+
+        <div id="evidenceSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">DOKUMENTASI & VERIFIKASI</span>
+              <h1>Bukti Transaksi</h1>
+              <p id="evidenceHeroText">Galeri nota, kuitansi, invoice, dan dokumen pendukung pengeluaran.</p>
+            </div>
+            <button id="refreshEvidenceBtn" class="brand-btn" type="button">↻ Perbarui Bukti</button>
+          </div>
+
+          <div class="module-stats report-stats">
+            <article class="mini-stat">
+              <span>Dokumen Bukti</span>
+              <strong id="evidenceFilesCount">0</strong>
+              <small>File pada periode terpilih</small>
+            </article>
+            <article class="mini-stat">
+              <span>Menunggu Approval</span>
+              <strong id="evidenceSubmittedCount">0</strong>
+              <small>Pengeluaran SUBMITTED</small>
+            </article>
+            <article class="mini-stat">
+              <span>Sudah Disetujui</span>
+              <strong id="evidenceApprovedCount">0</strong>
+              <small>Pengeluaran APPROVED</small>
+            </article>
+            <article class="mini-stat">
+              <span>Tanpa Bukti</span>
+              <strong id="evidenceMissingCount">0</strong>
+              <small>Perlu dilengkapi</small>
+            </article>
+          </div>
+
+          <article class="panel evidence-filter-panel">
+            <div class="evidence-filter-grid">
+              <label class="form-field">
+                <span>Dari Tanggal</span>
+                <input id="evidenceDateFrom" type="date">
+              </label>
+
+              <label class="form-field">
+                <span>Sampai Tanggal</span>
+                <input id="evidenceDateTo" type="date">
+              </label>
+
+              <label class="form-field">
+                <span>Lembaga</span>
+                <select id="evidenceInstitution">
+                  <option value="ALL">Semua Lembaga</option>
+                </select>
+              </label>
+
+              <label class="form-field">
+                <span>Status Transaksi</span>
+                <select id="evidenceStatus">
+                  <option value="ALL">Semua Status</option>
+                  <option value="SUBMITTED">SUBMITTED</option>
+                  <option value="APPROVED">APPROVED</option>
+                  <option value="DRAFT">DRAFT</option>
+                  <option value="REJECTED">REJECTED</option>
+                </select>
+              </label>
+
+              <label class="form-field">
+                <span>Status Bukti</span>
+                <select id="evidenceProofStatus">
+                  <option value="ALL">Semua</option>
+                  <option value="WITH_PROOF">Ada Bukti</option>
+                  <option value="MISSING">Tanpa Bukti</option>
+                </select>
+              </label>
+
+              <label class="form-field evidence-search-field">
+                <span>Pencarian</span>
+                <input id="evidenceSearch" type="search" placeholder="Nomor, kategori, keterangan...">
+              </label>
+            </div>
+          </article>
+
+          <div id="evidenceApprovalNotice" class="approval-center-note hidden">
+            <strong>Approval Center Yayasan</strong>
+            <span>Transaksi pengeluaran berstatus SUBMITTED dapat diperiksa bukti transaksinya lalu disetujui atau ditolak langsung dari halaman ini.</span>
+          </div>
+
+          <div id="evidenceGallery" class="evidence-gallery">
+            <div class="empty">Memuat bukti transaksi...</div>
+          </div>
+        </div>
+
+        <div id="evidencePreviewModal" class="evidence-modal hidden" aria-hidden="true">
+          <div class="evidence-modal-backdrop" data-evidence-close="true"></div>
+          <div class="evidence-modal-card">
+            <div class="evidence-modal-head">
+              <div>
+                <strong id="evidenceModalTitle">Bukti Transaksi</strong>
+                <span id="evidenceModalMeta">—</span>
+              </div>
+              <button id="closeEvidenceModal" class="modal-close-btn" type="button">×</button>
+            </div>
+            <div id="evidenceModalViewer" class="evidence-modal-viewer">
+              <div class="empty">Memuat...</div>
+            </div>
+            <div class="evidence-modal-actions">
+              <button id="openEvidenceExternalBtn" class="secondary-btn" type="button">Buka File</button>
+              <button id="closeEvidenceModalBtn" class="brand-btn" type="button">Tutup</button>
+            </div>
+          </div>
+        </div>
+
         <div id="placeholderSection" class="placeholder hidden">
           <div class="placeholder-card">
             <div class="big-icon">⚙</div>

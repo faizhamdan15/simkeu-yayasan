@@ -40,6 +40,11 @@ let analyticsInstitutionChart = null;
 let masterInstitutions = [];
 let usersRowsCache = [];
 
+let evidenceInstitutions = [];
+let evidenceRowsCache = [];
+let currentEvidenceExternalUrl = null;
+let evidenceThumbGeneration = 0;
+
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
 }).format(Number(n||0));
@@ -1744,6 +1749,328 @@ function restrictInstitutionSelector(selectId, institutions){
   return own;
 }
 
+
+/* =========================================================
+   PUSAT BUKTI TRANSAKSI + APPROVAL CENTER v6.3
+   ========================================================= */
+
+async function loadEvidenceModule(){
+  try{
+    if(!$("evidenceDateFrom").value) $("evidenceDateFrom").value=firstDayOfCurrentMonth();
+    if(!$("evidenceDateTo").value) $("evidenceDateTo").value=todayISO();
+
+    if(!evidenceInstitutions.length){
+      const {data,error}=await sb.from("institutions")
+        .select("id,code,name,institution_type,is_active")
+        .eq("is_active",true)
+        .order("name");
+      if(error) throw error;
+      evidenceInstitutions=data||[];
+    }
+
+    if(isCentralUser()){
+      $("evidenceInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
+        evidenceInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+      $("evidenceInstitution").disabled=false;
+      $("evidenceApprovalNotice").classList.remove("hidden");
+      $("evidenceHeroText").textContent="Galeri bukti sekaligus pusat pemeriksaan dan approval pengeluaran seluruh lembaga.";
+    }else{
+      restrictInstitutionSelector("evidenceInstitution",evidenceInstitutions);
+      $("evidenceApprovalNotice").classList.add("hidden");
+      $("evidenceHeroText").textContent=`Galeri nota, kuitansi, invoice, dan dokumen pengeluaran ${institutionDisplayName()}.`;
+    }
+
+    await fetchEvidenceTransactions();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat bukti transaksi: "+(err.message||"error"));
+  }
+}
+
+async function fetchEvidenceTransactions(){
+  const from=$("evidenceDateFrom").value;
+  const to=$("evidenceDateTo").value;
+
+  if(!from||!to) throw new Error("Tanggal awal dan akhir wajib diisi.");
+  if(from>to) throw new Error("Tanggal awal tidak boleh melewati tanggal akhir.");
+
+  $("evidenceGallery").innerHTML=`<div class="empty">Memuat bukti transaksi...</div>`;
+
+  const {data,error}=await sb.from("transactions")
+    .select(`
+      id,
+      transaction_number,
+      transaction_date,
+      transaction_type,
+      institution_id,
+      expense_category_id,
+      source_account_id,
+      amount,
+      description,
+      status,
+      created_at,
+      institutions:institution_id(name,code),
+      expense_categories:expense_category_id(name),
+      accounts:source_account_id(account_name),
+      transaction_attachments(id,file_name,file_path,file_type,uploaded_at)
+    `)
+    .eq("transaction_type","EXPENSE")
+    .gte("transaction_date",from)
+    .lte("transaction_date",to)
+    .order("transaction_date",{ascending:false})
+    .order("created_at",{ascending:false})
+    .limit(500);
+
+  if(error) throw error;
+  evidenceRowsCache=data||[];
+
+  updateEvidenceStats();
+  renderEvidenceGallery();
+}
+
+function getFilteredEvidenceRows(){
+  const institution=$("evidenceInstitution").value;
+  const status=$("evidenceStatus").value;
+  const proofStatus=$("evidenceProofStatus").value;
+  const search=($("evidenceSearch").value||"").trim().toLowerCase();
+
+  return evidenceRowsCache.filter(r=>{
+    const proofs=r.transaction_attachments||[];
+    const hay=[
+      r.transaction_number,
+      r.description,
+      r.institutions?.name,
+      r.expense_categories?.name,
+      r.accounts?.account_name,
+      ...proofs.map(p=>p.file_name)
+    ].filter(Boolean).join(" ").toLowerCase();
+
+    return (institution==="ALL" || r.institution_id===institution) &&
+      (status==="ALL" || r.status===status) &&
+      (proofStatus==="ALL" || (proofStatus==="WITH_PROOF" ? proofs.length>0 : proofs.length===0)) &&
+      (!search || hay.includes(search));
+  });
+}
+
+function updateEvidenceStats(){
+  const rows=getFilteredEvidenceRows();
+  const files=rows.reduce((sum,r)=>sum+(r.transaction_attachments?.length||0),0);
+
+  $("evidenceFilesCount").textContent=files;
+  $("evidenceSubmittedCount").textContent=rows.filter(r=>r.status==="SUBMITTED").length;
+  $("evidenceApprovedCount").textContent=rows.filter(r=>r.status==="APPROVED").length;
+  $("evidenceMissingCount").textContent=rows.filter(r=>(r.transaction_attachments||[]).length===0).length;
+}
+
+function renderEvidenceGallery(){
+  const rows=getFilteredEvidenceRows();
+  updateEvidenceStats();
+  const generation=++evidenceThumbGeneration;
+
+  if(!rows.length){
+    $("evidenceGallery").innerHTML=`<div class="empty">Tidak ada bukti/transaksi sesuai filter.</div>`;
+    return;
+  }
+
+  $("evidenceGallery").innerHTML=rows.map(r=>{
+    const proofs=r.transaction_attachments||[];
+    const first=proofs[0];
+    const isImage=first?.file_type?.startsWith("image/");
+    const hasProof=proofs.length>0;
+    const canApprove=isCentralUser() && r.status==="SUBMITTED" && hasProof;
+    const canReject=isCentralUser() && r.status==="SUBMITTED";
+
+    let preview;
+    if(!hasProof){
+      preview=`
+        <div class="evidence-file-placeholder">
+          <strong>!</strong>
+          <span>Belum ada bukti transaksi</span>
+        </div>`;
+    }else if(isImage){
+      preview=`
+        <div class="evidence-file-placeholder evidence-thumb-loading" data-thumb-placeholder="${r.id}">
+          <strong>⌛</strong>
+          <span>Memuat pratinjau...</span>
+        </div>
+        <img class="hidden" data-evidence-thumb="${r.id}" alt="Bukti ${escapeHtml(r.transaction_number||"")}">`;
+    }else{
+      preview=`
+        <div class="evidence-file-placeholder">
+          <strong>PDF</strong>
+          <span>${escapeHtml(first.file_name)}</span>
+        </div>`;
+    }
+
+    const actions=[];
+    if(hasProof){
+      actions.push(`<button class="secondary-btn evidence-action-btn" data-evidence-action="preview" data-id="${r.id}" type="button">Lihat Bukti</button>`);
+    }
+    if(canApprove){
+      actions.push(`<button class="brand-btn evidence-action-btn" data-evidence-action="approve" data-id="${r.id}" type="button">Setujui</button>`);
+    }
+    if(canReject){
+      actions.push(`<button class="table-action reject evidence-reject-btn" data-evidence-action="reject" data-id="${r.id}" type="button">Tolak</button>`);
+    }
+
+    return `
+      <article class="evidence-card ${hasProof?"":"evidence-missing"}">
+        <div class="evidence-preview">
+          <span class="pill ${statusClass(r.status)} evidence-status-top">${escapeHtml(r.status)}</span>
+          ${hasProof?`<span class="evidence-count-chip">${proofs.length} file</span>`:""}
+          ${preview}
+        </div>
+        <div class="evidence-card-body">
+          <div class="evidence-card-number">
+            <strong>${escapeHtml(r.transaction_number||"-")}</strong>
+            <span>${formatDate(r.transaction_date)}</span>
+          </div>
+          <h3 class="evidence-card-title">${escapeHtml(r.expense_categories?.name||"Pengeluaran")}</h3>
+          <p class="evidence-card-desc">${escapeHtml(r.description||"Tanpa keterangan")}</p>
+
+          <div class="evidence-card-meta">
+            <div><span>Lembaga</span><strong>${escapeHtml(r.institutions?.name||"-")}</strong></div>
+            <div><span>Akun Sumber</span><strong>${escapeHtml(r.accounts?.account_name||"-")}</strong></div>
+            <div><span>Nominal</span><strong class="evidence-amount">${rupiah(r.amount)}</strong></div>
+            <div><span>Dokumen</span><strong>${hasProof?`${proofs.length} file`:"Belum ada"}</strong></div>
+          </div>
+
+          ${!hasProof?`<div class="evidence-missing-warning">Transaksi ini belum memiliki nota/kuitansi.</div>`:""}
+
+          <div class="evidence-card-actions">
+            ${actions.join("") || `<span class="account-sub">Tidak ada aksi tersedia.</span>`}
+          </div>
+        </div>
+      </article>`;
+  }).join("");
+
+  hydrateEvidenceThumbnails(rows,generation);
+}
+
+async function hydrateEvidenceThumbnails(rows,generation){
+  const jobs=rows.slice(0,60).map(async r=>{
+    const first=(r.transaction_attachments||[])[0];
+    if(!first || !first.file_type?.startsWith("image/")) return;
+
+    try{
+      const {data,error}=await sb.storage
+        .from("transaction-proofs")
+        .createSignedUrl(first.file_path,300);
+      if(error) throw error;
+      if(generation!==evidenceThumbGeneration) return;
+
+      const img=document.querySelector(`[data-evidence-thumb="${r.id}"]`);
+      const placeholder=document.querySelector(`[data-thumb-placeholder="${r.id}"]`);
+      if(img){
+        img.src=data.signedUrl;
+        img.classList.remove("hidden");
+        img.onerror=()=>{
+          img.classList.add("hidden");
+          if(placeholder) placeholder.classList.remove("hidden");
+        };
+        img.onload=()=>{
+          if(placeholder) placeholder.classList.add("hidden");
+        };
+      }
+    }catch(err){
+      console.warn("Thumbnail gagal",r.id,err);
+    }
+  });
+  await Promise.allSettled(jobs);
+}
+
+async function createEvidenceSignedUrl(proof,seconds=300){
+  const {data,error}=await sb.storage
+    .from("transaction-proofs")
+    .createSignedUrl(proof.file_path,seconds);
+  if(error) throw error;
+  return data.signedUrl;
+}
+
+async function previewEvidence(transactionId){
+  const row=evidenceRowsCache.find(r=>r.id===transactionId);
+  const proofs=row?.transaction_attachments||[];
+  if(!row || !proofs.length) throw new Error("Bukti transaksi tidak ditemukan.");
+
+  let proof=proofs[0];
+  if(proofs.length>1){
+    const list=proofs.map((p,i)=>`${i+1}. ${p.file_name}`).join("\n");
+    const choice=prompt(`Transaksi memiliki ${proofs.length} file.\nPilih nomor file:\n\n${list}`,"1");
+    if(choice===null) return;
+    const idx=Number(choice)-1;
+    if(!Number.isInteger(idx)||idx<0||idx>=proofs.length) throw new Error("Nomor file tidak valid.");
+    proof=proofs[idx];
+  }
+
+  $("evidenceModalTitle").textContent=proof.file_name||"Bukti Transaksi";
+  $("evidenceModalMeta").textContent=`${row.transaction_number} • ${row.institutions?.name||"-"} • ${rupiah(row.amount)}`;
+  $("evidenceModalViewer").innerHTML=`<div class="evidence-loading">Memuat dokumen...</div>`;
+  $("evidencePreviewModal").classList.remove("hidden");
+  $("evidencePreviewModal").setAttribute("aria-hidden","false");
+
+  const url=await createEvidenceSignedUrl(proof,600);
+  currentEvidenceExternalUrl=url;
+
+  if(proof.file_type?.startsWith("image/")){
+    $("evidenceModalViewer").innerHTML=`<img src="${url}" alt="${escapeHtml(proof.file_name||"Bukti transaksi")}">`;
+  }else if(proof.file_type==="application/pdf" || proof.file_name?.toLowerCase().endsWith(".pdf")){
+    $("evidenceModalViewer").innerHTML=`<iframe src="${url}" title="${escapeHtml(proof.file_name||"PDF bukti")}"></iframe>`;
+  }else{
+    $("evidenceModalViewer").innerHTML=`
+      <div class="evidence-file-placeholder" style="color:#fff">
+        <strong>FILE</strong>
+        <span>${escapeHtml(proof.file_name||"Dokumen")}</span>
+      </div>`;
+  }
+}
+
+function closeEvidencePreview(){
+  $("evidencePreviewModal").classList.add("hidden");
+  $("evidencePreviewModal").setAttribute("aria-hidden","true");
+  $("evidenceModalViewer").innerHTML="";
+  currentEvidenceExternalUrl=null;
+}
+
+async function approveFromEvidence(transactionId){
+  if(!isCentralUser()) throw new Error("Approval hanya dapat dilakukan oleh akun Yayasan.");
+
+  const row=evidenceRowsCache.find(r=>r.id===transactionId);
+  if(!row) throw new Error("Transaksi tidak ditemukan.");
+  if(row.status!=="SUBMITTED") throw new Error("Hanya transaksi SUBMITTED yang dapat disetujui.");
+  if(!(row.transaction_attachments||[]).length) throw new Error("Transaksi belum memiliki bukti.");
+
+  if(!confirm(`Setujui ${row.transaction_number} sebesar ${rupiah(row.amount)}?`)) return;
+
+  const {error}=await sb.rpc("approve_transaction",{
+    p_transaction_id:transactionId,
+    p_note:"Disetujui melalui Pusat Bukti Transaksi"
+  });
+  if(error) throw error;
+
+  await Promise.all([fetchEvidenceTransactions(),loadDashboard()]);
+  toast("Transaksi disetujui. Saldo telah diperbarui.");
+}
+
+async function rejectFromEvidence(transactionId){
+  if(!isCentralUser()) throw new Error("Penolakan hanya dapat dilakukan oleh akun Yayasan.");
+
+  const row=evidenceRowsCache.find(r=>r.id===transactionId);
+  if(!row) throw new Error("Transaksi tidak ditemukan.");
+
+  const note=prompt(`Alasan penolakan ${row.transaction_number}:`);
+  if(note===null) return;
+  if(!note.trim()) throw new Error("Alasan penolakan wajib diisi.");
+
+  const {error}=await sb.rpc("reject_transaction",{
+    p_transaction_id:transactionId,
+    p_note:note.trim()
+  });
+  if(error) throw error;
+
+  await Promise.all([fetchEvidenceTransactions(),loadDashboard()]);
+  toast("Transaksi ditolak.");
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -1774,12 +2101,14 @@ $("refreshBtn").addEventListener("click",async()=>{
   const incomeVisible=!$("incomeSection").classList.contains("hidden");
   const expenseVisible=!$("expenseSection").classList.contains("hidden");
   const transferVisible=!$("transferSection").classList.contains("hidden");
+  const evidenceVisible=!$("evidenceSection").classList.contains("hidden");
   const reportVisible=!$("reportSection").classList.contains("hidden");
   const analyticsVisible=!$("analyticsSection").classList.contains("hidden");
 
   if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
   else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
   else if(transferVisible) await Promise.all([loadDashboard(),loadTransferModule()]);
+  else if(evidenceVisible) await Promise.all([loadDashboard(),fetchEvidenceTransactions()]);
   else if(reportVisible) await Promise.all([loadDashboard(),fetchReportTransactions()]);
   else if(analyticsVisible) await Promise.all([loadDashboard(),fetchAnalyticsData()]);
   else await loadDashboard();
@@ -1823,13 +2152,14 @@ async function switchView(v){
   $("incomeSection").classList.toggle("hidden",v!=="pemasukan");
   $("expenseSection").classList.toggle("hidden",v!=="pengeluaran");
   $("transferSection").classList.toggle("hidden",v!=="transfer");
+  $("evidenceSection").classList.toggle("hidden",v!=="bukti");
   $("reportSection").classList.toggle("hidden",v!=="laporan");
   $("analyticsSection").classList.toggle("hidden",v!=="analitik");
   $("institutionsSection").classList.toggle("hidden",v!=="lembaga");
   $("usersSection").classList.toggle("hidden",v!=="pengguna");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","laporan","analitik","lembaga","pengguna"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","analitik","lembaga","pengguna"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -1838,6 +2168,8 @@ async function switchView(v){
     await loadExpenseModule();
   }else if(v==="transfer"){
     await loadTransferModule();
+  }else if(v==="bukti"){
+    await loadEvidenceModule();
   }else if(v==="laporan"){
     await loadReportModule();
   }else if(v==="analitik"){
@@ -1915,6 +2247,59 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
 
 
 
+
+
+/* Evidence center events */
+["evidenceInstitution","evidenceStatus","evidenceProofStatus"].forEach(id=>{
+  $(id).addEventListener("change",renderEvidenceGallery);
+});
+$("evidenceSearch").addEventListener("input",renderEvidenceGallery);
+
+$("evidenceDateFrom").addEventListener("change",async()=>{
+  try{await fetchEvidenceTransactions()}catch(err){console.error(err);toast("Gagal memuat bukti: "+(err.message||"error"))}
+});
+$("evidenceDateTo").addEventListener("change",async()=>{
+  try{await fetchEvidenceTransactions()}catch(err){console.error(err);toast("Gagal memuat bukti: "+(err.message||"error"))}
+});
+
+$("refreshEvidenceBtn").addEventListener("click",async()=>{
+  try{
+    await fetchEvidenceTransactions();
+    toast("Bukti transaksi diperbarui.");
+  }catch(err){
+    console.error(err);toast("Gagal memperbarui bukti: "+(err.message||"error"));
+  }
+});
+
+$("evidenceGallery").addEventListener("click",async e=>{
+  const btn=e.target.closest("[data-evidence-action]");
+  if(!btn) return;
+  btn.disabled=true;
+  try{
+    const id=btn.dataset.id;
+    const action=btn.dataset.evidenceAction;
+    if(action==="preview") await previewEvidence(id);
+    if(action==="approve") await approveFromEvidence(id);
+    if(action==="reject") await rejectFromEvidence(id);
+  }catch(err){
+    console.error(err);
+    toast("Aksi gagal: "+(err.message||"error"));
+  }finally{
+    btn.disabled=false;
+  }
+});
+
+$("closeEvidenceModal").addEventListener("click",closeEvidencePreview);
+$("closeEvidenceModalBtn").addEventListener("click",closeEvidencePreview);
+document.querySelector(".evidence-modal-backdrop").addEventListener("click",closeEvidencePreview);
+$("openEvidenceExternalBtn").addEventListener("click",()=>{
+  if(currentEvidenceExternalUrl) window.open(currentEvidenceExternalUrl,"_blank","noopener,noreferrer");
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape" && !$("evidencePreviewModal").classList.contains("hidden")){
+    closeEvidencePreview();
+  }
+});
 
 /* Institution + User events */
 $("refreshUsersBtn").addEventListener("click",async()=>{
