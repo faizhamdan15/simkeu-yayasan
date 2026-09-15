@@ -49,6 +49,14 @@ let auditInstitutions = [];
 let auditProfiles = [];
 let auditRowsCache = [];
 
+let budgetInstitutions = [];
+let budgetCategories = [];
+let budgetRowsCache = [];
+
+let closingInstitutions = [];
+let closingRowsCache = [];
+let closingPendingRows = [];
+
 const rupiah = n => new Intl.NumberFormat("id-ID",{
   style:"currency",currency:"IDR",maximumFractionDigits:0
 }).format(Number(n||0));
@@ -1715,7 +1723,7 @@ function applyRoleBasedUI(){
   document.body.classList.toggle("institution-mode",!central);
 
   // Menu khusus pusat.
-  ["navInstitutions","navUsers","navAudit"].forEach(id=>{
+  ["navInstitutions","navUsers","navAudit","navClosing"].forEach(id=>{
     const el=$(id);
     if(el) el.classList.toggle("role-hidden",!central);
   });
@@ -2094,7 +2102,11 @@ const AUDIT_ACTION_LABELS={
   USER_PROFILE_UPDATED:"Profil pengguna diubah",
   ACCOUNT_CREATED:"Akun keuangan dibuat",
   ACCOUNT_UPDATED:"Akun keuangan diubah",
-  APPROVAL_RECORDED:"Approval dicatat"
+  APPROVAL_RECORDED:"Approval dicatat",
+  BUDGET_CREATED:"Anggaran dibuat",
+  BUDGET_UPDATED:"Anggaran diperbarui",
+  PERIOD_CLOSED:"Periode ditutup",
+  PERIOD_REOPENED:"Periode dibuka kembali"
 };
 
 function auditActionLabel(action){
@@ -2106,6 +2118,8 @@ function auditCategory(action){
   if(a.startsWith("PROOF_")) return "PROOF";
   if(a.startsWith("USER_")) return "USER";
   if(a.startsWith("ACCOUNT_")) return "ACCOUNT";
+  if(a.startsWith("BUDGET_")) return "BUDGET";
+  if(a.startsWith("PERIOD_")) return "PERIOD";
   if(a.includes("SUBMITTED")||a.includes("APPROVED")||a.includes("REJECTED")||a.includes("VOIDED")||a.startsWith("APPROVAL_")) return "APPROVAL";
   if(a.startsWith("TRANSACTION_")) return "TRANSACTION";
   return "TRANSACTION";
@@ -2118,6 +2132,9 @@ function auditVisual(action){
   if(a.startsWith("PROOF_")) return {icon:"▤",cls:"proof"};
   if(a.startsWith("USER_")) return {icon:"♙",cls:"user"};
   if(a.startsWith("ACCOUNT_")) return {icon:"▣",cls:"account"};
+  if(a.startsWith("BUDGET_")) return {icon:"▧",cls:"account"};
+  if(a==="PERIOD_CLOSED") return {icon:"🔒",cls:"approval"};
+  if(a==="PERIOD_REOPENED") return {icon:"↺",cls:"account"};
   if(a.includes("SUBMITTED")) return {icon:"→",cls:"approval"};
   return {icon:"◷",cls:""};
 }
@@ -2145,6 +2162,14 @@ function auditTargetTitle(row){
   }
   if(row.table_name==="accounts"){
     return d.account_name || "Akun keuangan";
+  }
+  if(row.table_name==="budgets"){
+    return `Anggaran ${d.fiscal_year||""}`.trim();
+  }
+  if(row.table_name==="period_closures"){
+    const month=Number(d.period_month||0);
+    const name=month>=1&&month<=12 ? MONTH_NAMES[month-1] : `Bulan ${month}`;
+    return `${name} ${d.fiscal_year||""}`.trim();
   }
   return `${row.table_name||"Data"} ${String(row.record_id||"").slice(0,8)}`;
 }
@@ -2202,6 +2227,20 @@ function auditDescription(row){
   }
   if(action==="APPROVAL_RECORDED"){
     return `${d.approval_action||"Approval"}${d.note?` • ${d.note}`:""}`;
+  }
+  if(action==="BUDGET_CREATED"){
+    return `Anggaran ${d.fiscal_year||""} ditetapkan sebesar ${rupiah(Number(d.budget_amount||0))}.`;
+  }
+  if(action==="BUDGET_UPDATED"){
+    return `Anggaran diperbarui dari ${rupiah(Number(d.old_budget_amount||0))} menjadi ${rupiah(Number(d.new_budget_amount||0))}.`;
+  }
+  if(action==="PERIOD_CLOSED"){
+    const m=Number(d.period_month||0);
+    return `Periode ${m>=1&&m<=12?MONTH_NAMES[m-1]:m} ${d.fiscal_year||""} ditutup.${d.note?` • ${d.note}`:""}`;
+  }
+  if(action==="PERIOD_REOPENED"){
+    const m=Number(d.period_month||0);
+    return `Periode ${m>=1&&m<=12?MONTH_NAMES[m-1]:m} ${d.fiscal_year||""} dibuka kembali.${d.reason?` • ${d.reason}`:""}`;
   }
   return "Aktivitas sistem tercatat.";
 }
@@ -2352,7 +2391,9 @@ function renderAuditSummary(rows){
     ["APPROVAL","Submit / Approval"],
     ["PROOF","Bukti Transaksi"],
     ["USER","Pengguna"],
-    ["ACCOUNT","Akun Keuangan"]
+    ["ACCOUNT","Akun Keuangan"],
+    ["BUDGET","Anggaran"],
+    ["PERIOD","Tutup Buku"]
   ];
   const total=rows.length||1;
 
@@ -2397,13 +2438,23 @@ function showAuditDetail(id){
     ["new_role","Role baru"],
     ["account_name","Nama akun"],
     ["note","Catatan"],
-    ["rejection_note","Alasan penolakan"]
+    ["rejection_note","Alasan penolakan"],
+    ["fiscal_year","Tahun"],
+    ["period_month","Bulan"],
+    ["budget_amount","Anggaran"],
+    ["old_budget_amount","Anggaran sebelumnya"],
+    ["new_budget_amount","Anggaran baru"],
+    ["reason","Alasan"]
   ];
 
   readableKeys.forEach(([key,label])=>{
     if(d[key]!==undefined && d[key]!==null && d[key]!==""){
       let val=d[key];
-      if(key==="amount") val=rupiah(Number(val||0));
+      if(["amount","budget_amount","old_budget_amount","new_budget_amount"].includes(key)) val=rupiah(Number(val||0));
+      if(key==="period_month"){
+        const m=Number(val);
+        val=m>=1&&m<=12?MONTH_NAMES[m-1]:val;
+      }
       if(key==="role"||key==="old_role"||key==="new_role") val=roleLabel(val);
       changes.push(`<div class="audit-change-row"><span>${label}</span><strong>${escapeHtml(String(val))}</strong></div>`);
     }
@@ -2455,6 +2506,349 @@ function exportAuditCsv(){
   toast("Audit Trail berhasil diekspor.");
 }
 
+
+/* =========================================================
+   ANGGARAN & REALISASI v6.5
+   ========================================================= */
+
+function fillYearOptions(selectId,spanBack=3,spanForward=2){
+  const select=$(selectId);
+  const now=new Date().getFullYear();
+  if(select.options.length) return;
+  const years=[];
+  for(let y=now-spanBack;y<=now+spanForward;y++) years.push(y);
+  select.innerHTML=years.reverse().map(y=>`<option value="${y}">${y}</option>`).join("");
+  select.value=String(now);
+}
+
+async function loadBudgetModule(){
+  try{
+    fillYearOptions("budgetYear");
+    fillYearOptions("budgetFormYear");
+
+    if(!budgetInstitutions.length || !budgetCategories.length){
+      const [instRes,catRes]=await Promise.all([
+        sb.from("institutions").select("id,name,code,institution_type,is_active").eq("is_active",true).order("name"),
+        sb.from("expense_categories").select("id,name,code,is_active").eq("is_active",true).order("name")
+      ]);
+      if(instRes.error) throw instRes.error;
+      if(catRes.error) throw catRes.error;
+      budgetInstitutions=instRes.data||[];
+      budgetCategories=catRes.data||[];
+    }
+
+    if(isCentralUser()){
+      $("budgetInstitution").innerHTML=`<option value="ALL">Semua Lembaga</option>`+
+        budgetInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+      $("budgetInstitution").disabled=false;
+      $("budgetFormInstitution").innerHTML=`<option value="">Pilih lembaga</option>`+
+        budgetInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+      $("newBudgetBtn").classList.remove("hidden");
+      $("budgetFormCard").classList.remove("hidden");
+      $("budgetHeroText").textContent="Tetapkan plafon dan pantau serapan anggaran seluruh lembaga.";
+    }else{
+      restrictInstitutionSelector("budgetInstitution",budgetInstitutions);
+      $("newBudgetBtn").classList.add("hidden");
+      $("budgetFormCard").classList.add("hidden");
+      $("budgetHeroText").textContent=`Pantau anggaran dan realisasi ${institutionDisplayName()}.`;
+    }
+
+    $("budgetFormCategory").innerHTML=`<option value="">Pilih kategori</option>`+
+      budgetCategories.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+
+    await fetchBudgetRealization();
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat Anggaran: "+(err.message||"error"));
+  }
+}
+
+async function fetchBudgetRealization(){
+  const year=Number($("budgetYear").value);
+  const institution=$("budgetInstitution").value;
+
+  let query=sb.from("v_budget_realization")
+    .select("budget_id,fiscal_year,institution_id,institution_name,expense_category_id,category_name,budget_amount,realization_amount,remaining_amount,absorption_percent,note")
+    .eq("fiscal_year",year)
+    .order("institution_name")
+    .order("category_name");
+
+  if(institution && institution!=="ALL") query=query.eq("institution_id",institution);
+
+  const {data,error}=await query;
+  if(error) throw error;
+  budgetRowsCache=data||[];
+  renderBudgetRealization();
+}
+
+function budgetStatus(row){
+  const budget=Number(row.budget_amount||0);
+  const real=Number(row.realization_amount||0);
+  const pct=budget>0?real/budget*100:(real>0?999:0);
+
+  if(real>budget && budget>=0) return {label:"MELEBIHI",cls:"over",pct};
+  if(pct>=80) return {label:"WASPADA",cls:"warning",pct};
+  return {label:"AMAN",cls:"safe",pct};
+}
+
+function renderBudgetRealization(){
+  const rows=budgetRowsCache;
+  const totalBudget=rows.reduce((s,r)=>s+Number(r.budget_amount||0),0);
+  const totalReal=rows.reduce((s,r)=>s+Number(r.realization_amount||0),0);
+  const remaining=totalBudget-totalReal;
+  const absorption=totalBudget>0?totalReal/totalBudget*100:0;
+
+  $("budgetTotalAmount").textContent=rupiah(totalBudget);
+  $("budgetRealizationAmount").textContent=rupiah(totalReal);
+  $("budgetRemainingAmount").textContent=rupiah(remaining);
+  $("budgetRemainingAmount").classList.toggle("budget-negative",remaining<0);
+  $("budgetRemainingAmount").classList.toggle("budget-positive",remaining>=0);
+  $("budgetAbsorptionPercent").textContent=(Math.round(absorption*10)/10).toLocaleString("id-ID")+"%";
+
+  const overRows=rows.filter(r=>Number(r.realization_amount||0)>Number(r.budget_amount||0));
+  if(overRows.length){
+    $("budgetAlert").classList.remove("hidden");
+    $("budgetAlert").textContent=`⚠ ${overRows.length} kategori telah melebihi anggaran. Periksa realisasi sebelum approval pengeluaran berikutnya.`;
+  }else{
+    $("budgetAlert").classList.add("hidden");
+  }
+
+  $("budgetTableBody").innerHTML=rows.length?rows.map(r=>{
+    const status=budgetStatus(r);
+    const remaining=Number(r.remaining_amount||0);
+    const displayPct=Math.max(0,Math.min(status.pct,100));
+    return `<tr>
+      <td>${escapeHtml(r.institution_name||"-")}</td>
+      <td><strong>${escapeHtml(r.category_name||"-")}</strong></td>
+      <td>${rupiah(r.budget_amount)}</td>
+      <td><strong>${rupiah(r.realization_amount)}</strong></td>
+      <td class="${remaining<0?'budget-negative':'budget-positive'}">${rupiah(remaining)}</td>
+      <td>
+        <div class="budget-progress-wrap">
+          <div class="budget-progress-label">
+            <span>${status.pct>=999?">999":(Math.round(status.pct*10)/10).toLocaleString("id-ID")}%</span>
+            <span>${rupiah(r.realization_amount)}</span>
+          </div>
+          <div class="budget-progress ${status.cls}"><i style="width:${displayPct}%"></i></div>
+        </div>
+      </td>
+      <td><span class="budget-status ${status.cls}">${status.label}</span></td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="7" class="empty">Belum ada anggaran pada filter ini.</td></tr>`;
+}
+
+async function saveBudget(){
+  if(!isCentralUser()) throw new Error("Hanya akun Yayasan yang dapat menetapkan anggaran.");
+
+  const fiscal_year=Number($("budgetFormYear").value);
+  const institution_id=$("budgetFormInstitution").value;
+  const expense_category_id=$("budgetFormCategory").value;
+  const budget_amount=Number($("budgetFormAmount").value);
+  const note=($("budgetFormNote").value||"").trim();
+
+  if(!fiscal_year||!institution_id||!expense_category_id||budget_amount<0){
+    throw new Error("Lengkapi tahun, lembaga, kategori, dan nilai anggaran.");
+  }
+
+  const {error}=await sb.from("budgets").upsert({
+    fiscal_year,
+    institution_id,
+    expense_category_id,
+    budget_amount,
+    note:note||null,
+    created_by:currentSession.user.id,
+    updated_by:currentSession.user.id
+  },{
+    onConflict:"fiscal_year,institution_id,expense_category_id"
+  });
+  if(error) throw error;
+
+  $("budgetForm").reset();
+  $("budgetFormYear").value=String(new Date().getFullYear());
+  $("budgetFormAmountPreview").textContent="Rp0";
+  $("budgetYear").value=String(fiscal_year);
+  $("budgetInstitution").value=institution_id;
+  await fetchBudgetRealization();
+  toast("Anggaran berhasil disimpan.");
+}
+
+
+/* =========================================================
+   TUTUP BUKU BULANAN v6.5
+   ========================================================= */
+
+const MONTH_NAMES=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+
+async function loadClosingModule(){
+  if(!isCentralUser()){
+    toast("Tutup Buku hanya tersedia untuk akun Yayasan.");
+    await switchView("dashboard");
+    return;
+  }
+
+  try{
+    fillYearOptions("closingYear");
+
+    if(!closingInstitutions.length){
+      const {data,error}=await sb.from("institutions")
+        .select("id,name,code,institution_type,is_active")
+        .eq("is_active",true)
+        .order("name");
+      if(error) throw error;
+      closingInstitutions=data||[];
+      $("closingInstitution").innerHTML=`<option value="">Pilih lembaga</option>`+
+        closingInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+    }
+
+    if($("closingInstitution").value){
+      await fetchClosingData();
+    }else{
+      $("closingMonthsGrid").innerHTML=`<div class="empty">Pilih lembaga untuk melihat periode.</div>`;
+    }
+  }catch(err){
+    console.error(err);
+    toast("Gagal memuat Tutup Buku: "+(err.message||"error"));
+  }
+}
+
+async function fetchClosingData(){
+  const year=Number($("closingYear").value);
+  const institutionId=$("closingInstitution").value;
+  if(!institutionId){
+    $("closingMonthsGrid").innerHTML=`<div class="empty">Pilih lembaga untuk melihat periode.</div>`;
+    return;
+  }
+
+  const start=`${year}-01-01`;
+  const next=`${year+1}-01-01`;
+
+  const [closeRes,pendingRes]=await Promise.all([
+    sb.from("period_closures")
+      .select("id,institution_id,fiscal_year,period_month,closed_by,closed_at,note,status")
+      .eq("institution_id",institutionId)
+      .eq("fiscal_year",year)
+      .eq("status","CLOSED")
+      .order("period_month"),
+    sb.from("transactions")
+      .select("id,transaction_date,status,institution_id,source_account_id,destination_account_id,source_account:source_account_id(institution_id),destination_account:destination_account_id(institution_id)")
+      .gte("transaction_date",start)
+      .lt("transaction_date",next)
+      .in("status",["DRAFT","SUBMITTED"])
+  ]);
+
+  if(closeRes.error) throw closeRes.error;
+  if(pendingRes.error) throw pendingRes.error;
+
+  closingRowsCache=closeRes.data||[];
+  closingPendingRows=(pendingRes.data||[]).filter(r=>
+    r.institution_id===institutionId ||
+    r.source_account?.institution_id===institutionId ||
+    r.destination_account?.institution_id===institutionId
+  );
+
+  renderClosingMonths();
+}
+
+function renderClosingMonths(){
+  const year=Number($("closingYear").value);
+  const closedMap=new Map(closingRowsCache.map(r=>[Number(r.period_month),r]));
+  const pendingByMonth=Array(12).fill(0);
+  closingPendingRows.forEach(r=>{
+    const month=new Date(r.transaction_date+"T00:00:00").getMonth();
+    pendingByMonth[month]++;
+  });
+
+  const closedCount=closingRowsCache.length;
+  $("closedMonthsCount").textContent=closedCount;
+  $("openMonthsCount").textContent=12-closedCount;
+  $("closingPendingCount").textContent=closingPendingRows.length;
+
+  const last=closingRowsCache.slice().sort((a,b)=>Number(b.period_month)-Number(a.period_month))[0];
+  $("lastClosedPeriod").textContent=last?`${MONTH_NAMES[Number(last.period_month)-1]} ${year}`:"—";
+
+  $("closingMonthsGrid").innerHTML=MONTH_NAMES.map((name,index)=>{
+    const month=index+1;
+    const closure=closedMap.get(month);
+    const pending=pendingByMonth[index];
+    const isClosed=!!closure;
+
+    return `<article class="closing-month-card ${isClosed?'closed':''}">
+      <div class="closing-month-head">
+        <div>
+          <h3>${name}</h3>
+          <small>${name} ${year}</small>
+        </div>
+        <span class="period-chip ${isClosed?'closed':'open'}">${isClosed?'CLOSED':'OPEN'}</span>
+      </div>
+
+      <div class="closing-month-stats">
+        <div><span>Pending</span><strong>${pending}</strong></div>
+        <div><span>Status</span><strong>${isClosed?'Final':'Aktif'}</strong></div>
+      </div>
+
+      <div class="closing-month-actions">
+        ${isClosed
+          ? `<button class="reopen-period-btn" data-closing-action="reopen" data-month="${month}" type="button">Buka Kembali</button>`
+          : `<button class="close-period-btn" data-closing-action="close" data-month="${month}" type="button" ${pending>0?'disabled':''}>Tutup Bulan</button>`
+        }
+      </div>
+
+      ${isClosed
+        ? `<div class="closed-meta">Ditutup ${auditLocalDateTime(closure.closed_at)}${closure.note?` • ${escapeHtml(closure.note)}`:""}</div>`
+        : pending>0
+          ? `<div class="closed-meta" style="color:#A35B16">Selesaikan ${pending} transaksi pending sebelum ditutup.</div>`
+          : `<div class="closed-meta">Tidak ada transaksi pending.</div>`
+      }
+    </article>`;
+  }).join("");
+}
+
+async function closePeriod(month){
+  const year=Number($("closingYear").value);
+  const institutionId=$("closingInstitution").value;
+  const inst=closingInstitutions.find(i=>i.id===institutionId);
+  if(!institutionId) throw new Error("Pilih lembaga.");
+
+  const note=prompt(`Catatan Tutup Buku ${MONTH_NAMES[month-1]} ${year} — ${inst?.name||"Lembaga"} (opsional):`,"");
+  if(note===null) return;
+
+  if(!confirm(`Tutup periode ${MONTH_NAMES[month-1]} ${year} untuk ${inst?.name||"lembaga"}?\n\nSetelah ditutup, transaksi pada bulan ini akan dikunci.`)) return;
+
+  const {error}=await sb.rpc("close_financial_period",{
+    p_institution_id:institutionId,
+    p_fiscal_year:year,
+    p_period_month:month,
+    p_note:note.trim()||null
+  });
+  if(error) throw error;
+
+  await fetchClosingData();
+  toast(`Periode ${MONTH_NAMES[month-1]} ${year} berhasil ditutup.`);
+}
+
+async function reopenPeriod(month){
+  const year=Number($("closingYear").value);
+  const institutionId=$("closingInstitution").value;
+  const inst=closingInstitutions.find(i=>i.id===institutionId);
+
+  const reason=prompt(`Alasan membuka kembali ${MONTH_NAMES[month-1]} ${year}:`);
+  if(reason===null) return;
+  if(!reason.trim()) throw new Error("Alasan membuka kembali periode wajib diisi.");
+
+  if(!confirm(`Buka kembali periode ${MONTH_NAMES[month-1]} ${year} untuk ${inst?.name||"lembaga"}?`)) return;
+
+  const {error}=await sb.rpc("reopen_financial_period",{
+    p_institution_id:institutionId,
+    p_fiscal_year:year,
+    p_period_month:month,
+    p_note:reason.trim()
+  });
+  if(error) throw error;
+
+  await fetchClosingData();
+  toast(`Periode ${MONTH_NAMES[month-1]} ${year} dibuka kembali.`);
+}
+
 /* =========================================================
    AUTH + NAV
    ========================================================= */
@@ -2489,6 +2883,8 @@ $("refreshBtn").addEventListener("click",async()=>{
   const reportVisible=!$("reportSection").classList.contains("hidden");
   const analyticsVisible=!$("analyticsSection").classList.contains("hidden");
   const auditVisible=!$("auditSection").classList.contains("hidden");
+  const budgetVisible=!$("budgetSection").classList.contains("hidden");
+  const closingVisible=!$("closingSection").classList.contains("hidden");
 
   if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
   else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
@@ -2497,6 +2893,8 @@ $("refreshBtn").addEventListener("click",async()=>{
   else if(reportVisible) await Promise.all([loadDashboard(),fetchReportTransactions()]);
   else if(analyticsVisible) await Promise.all([loadDashboard(),fetchAnalyticsData()]);
   else if(auditVisible) await Promise.all([loadDashboard(),fetchAuditLogs()]);
+  else if(budgetVisible) await Promise.all([loadDashboard(),fetchBudgetRealization()]);
+  else if(closingVisible) await Promise.all([loadDashboard(),fetchClosingData()]);
   else await loadDashboard();
 
   toast("Data diperbarui.");
@@ -2512,12 +2910,14 @@ const meta={
   laporan:["Laporan","Rekap keuangan dan ekspor"],
   analitik:["Analitik","Diagram, tren, dan persentase"],
   pengguna:["Pengguna","Kelola akun dan hak akses"],
-  audit:["Audit Trail","Riwayat aktivitas dan perubahan sistem"]
+  audit:["Audit Trail","Riwayat aktivitas dan perubahan sistem"],
+  anggaran:["Anggaran","Anggaran, realisasi, dan serapan"],
+  tutupbuku:["Tutup Buku","Finalisasi dan penguncian periode bulanan"]
 };
 
 async function switchView(v){
   // Halaman pusat tidak boleh dibuka dari akun lembaga meskipun dipanggil manual.
-  if(!isCentralUser() && ["lembaga","pengguna","audit"].includes(v)){
+  if(!isCentralUser() && ["lembaga","pengguna","audit","tutupbuku"].includes(v)){
     toast("Menu ini hanya tersedia untuk akun Yayasan.");
     v="dashboard";
   }
@@ -2545,9 +2945,11 @@ async function switchView(v){
   $("institutionsSection").classList.toggle("hidden",v!=="lembaga");
   $("usersSection").classList.toggle("hidden",v!=="pengguna");
   $("auditSection").classList.toggle("hidden",v!=="audit");
+  $("budgetSection").classList.toggle("hidden",v!=="anggaran");
+  $("closingSection").classList.toggle("hidden",v!=="tutupbuku");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","analitik","lembaga","pengguna","audit"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","analitik","lembaga","pengguna","audit","anggaran","tutupbuku"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -2568,6 +2970,10 @@ async function switchView(v){
     await loadUsersModule();
   }else if(v==="audit"){
     await loadAuditModule();
+  }else if(v==="anggaran"){
+    await loadBudgetModule();
+  }else if(v==="tutupbuku"){
+    await loadClosingModule();
   }else if(v!=="dashboard"){
     $("placeholderTitle").textContent=meta[v][0];
   }
@@ -2639,6 +3045,55 @@ $("incomeTransactionsBody").addEventListener("click",async e=>{
 
 
 
+
+
+/* Budget events */
+$("budgetYear").addEventListener("change",async()=>{
+  try{await fetchBudgetRealization()}catch(err){console.error(err);toast("Gagal memuat anggaran: "+(err.message||"error"))}
+});
+$("budgetInstitution").addEventListener("change",async()=>{
+  try{await fetchBudgetRealization()}catch(err){console.error(err);toast("Gagal memuat anggaran: "+(err.message||"error"))}
+});
+$("refreshBudgetBtn").addEventListener("click",async()=>{
+  try{await fetchBudgetRealization();toast("Anggaran diperbarui.")}catch(err){console.error(err);toast("Gagal memperbarui anggaran: "+(err.message||"error"))}
+});
+$("newBudgetBtn").addEventListener("click",()=>{
+  $("budgetFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+});
+$("budgetFormAmount").addEventListener("input",()=>{
+  $("budgetFormAmountPreview").textContent=rupiah(Number($("budgetFormAmount").value||0));
+});
+$("budgetForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  $("saveBudgetBtn").disabled=true;
+  try{await saveBudget()}catch(err){console.error(err);toast("Gagal menyimpan anggaran: "+(err.message||"error"))}
+  finally{$("saveBudgetBtn").disabled=false}
+});
+
+/* Closing events */
+$("closingYear").addEventListener("change",async()=>{
+  try{await fetchClosingData()}catch(err){console.error(err);toast("Gagal memuat periode: "+(err.message||"error"))}
+});
+$("closingInstitution").addEventListener("change",async()=>{
+  try{await fetchClosingData()}catch(err){console.error(err);toast("Gagal memuat periode: "+(err.message||"error"))}
+});
+$("refreshClosingBtn").addEventListener("click",async()=>{
+  try{await fetchClosingData();toast("Status Tutup Buku diperbarui.")}catch(err){console.error(err);toast("Gagal memperbarui periode: "+(err.message||"error"))}
+});
+$("closingMonthsGrid").addEventListener("click",async e=>{
+  const btn=e.target.closest("[data-closing-action]");
+  if(!btn)return;
+  btn.disabled=true;
+  try{
+    const month=Number(btn.dataset.month);
+    if(btn.dataset.closingAction==="close") await closePeriod(month);
+    if(btn.dataset.closingAction==="reopen") await reopenPeriod(month);
+  }catch(err){
+    console.error(err);toast("Aksi Tutup Buku gagal: "+(err.message||"error"));
+  }finally{
+    btn.disabled=false;
+  }
+});
 
 /* Audit Trail events */
 ["auditInstitution","auditActor","auditAction"].forEach(id=>{

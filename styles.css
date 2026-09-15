@@ -922,3 +922,105 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
   .audit-detail-grid{grid-template-columns:1fr}
   .audit-change-row{grid-template-columns:1fr}
 }
+
+
+/* =========================================================
+   ANGGARAN + TUTUP BUKU v6.5
+   ========================================================= */
+.budget-filter-grid,.closing-filter-grid{
+  display:grid;grid-template-columns:220px minmax(240px,420px) auto;gap:10px;align-items:end
+}
+.budget-refresh-btn{width:auto;margin:0;height:43px;padding:0 15px}
+.budget-layout{
+  display:grid;grid-template-columns:minmax(330px,.72fr) minmax(0,1.7fr);gap:15px
+}
+.budget-table{min-width:900px}
+.budget-progress-wrap{min-width:125px}
+.budget-progress-label{
+  display:flex;justify-content:space-between;gap:7px;font-size:8px;margin-bottom:5px
+}
+.budget-progress{
+  height:7px;background:#ECE8E3;border-radius:999px;overflow:hidden
+}
+.budget-progress i{
+  display:block;height:100%;border-radius:999px;background:#2F855A
+}
+.budget-progress.warning i{background:#F89921}
+.budget-progress.over i{background:#C0392B}
+.budget-status{
+  display:inline-flex;padding:4px 7px;border-radius:999px;font-size:8px;font-weight:900
+}
+.budget-status.safe{background:#EAF7EF;color:#227447}
+.budget-status.warning{background:#FFF2DD;color:#A35B16}
+.budget-status.over{background:#FFF0EE;color:#A93427}
+.budget-alert{
+  margin-bottom:14px;border-radius:13px;padding:11px 13px;font-size:10px;font-weight:750;
+  border:1px solid #F1C6BF;background:#FFF4F2;color:#A2392D
+}
+.budget-negative{color:#B52F25!important}
+.budget-positive{color:#277345!important}
+
+.closing-warning{
+  display:flex;flex-direction:column;gap:4px;margin-bottom:14px;padding:12px 14px;
+  border:1px solid #F0D2A8;background:#FFF8EF;border-radius:14px;color:#6F563D
+}
+.closing-warning strong{font-size:11px;color:#8E4B19}
+.closing-warning span{font-size:10px;line-height:1.45}
+.closing-month-grid{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px
+}
+.closing-month-card{
+  background:#fff;border:1px solid var(--line);border-radius:16px;padding:15px;
+  box-shadow:0 6px 18px rgba(40,30,18,.03)
+}
+.closing-month-card.closed{
+  background:#F6FAF7;border-color:#CFE4D6
+}
+.closing-month-head{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px
+}
+.closing-month-head h3{margin:0;font-size:13px}
+.closing-month-head small{display:block;margin-top:3px;font-size:8px;color:#948A81}
+.period-chip{
+  display:inline-flex;padding:4px 7px;border-radius:999px;font-size:8px;font-weight:900
+}
+.period-chip.open{background:#FFF2DD;color:#A35B16}
+.period-chip.closed{background:#E8F6ED;color:#237447}
+.closing-month-stats{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px
+}
+.closing-month-stats div{
+  padding:8px;border:1px solid #EEE8E1;background:#FBFAF8;border-radius:9px;
+  display:flex;flex-direction:column;gap:2px
+}
+.closing-month-stats span{font-size:7px;color:#A0968D;text-transform:uppercase;font-weight:850}
+.closing-month-stats strong{font-size:10px}
+.closing-month-actions{display:flex;gap:7px}
+.closing-month-actions button{flex:1}
+.close-period-btn{
+  height:33px;border:none;border-radius:9px;background:#F89921;color:#1D150D;
+  font-size:9px;font-weight:900;cursor:pointer
+}
+.reopen-period-btn{
+  height:33px;border:1px solid #D8CEC4;border-radius:9px;background:#fff;color:#665A50;
+  font-size:9px;font-weight:900;cursor:pointer
+}
+.close-period-btn:disabled,.reopen-period-btn:disabled{opacity:.45;cursor:not-allowed}
+.closed-meta{
+  margin-top:8px;font-size:8px;color:#7B8A80;line-height:1.4
+}
+
+@media(max-width:1150px){
+  .budget-layout{grid-template-columns:1fr}
+  .closing-month-grid{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:800px){
+  .budget-filter-grid,.closing-filter-grid{grid-template-columns:1fr 1fr}
+  .budget-refresh-btn{grid-column:1/-1}
+  .closing-month-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:520px){
+  .budget-filter-grid,.closing-filter-grid{grid-template-columns:1fr}
+  .budget-refresh-btn{grid-column:auto}
+  .closing-month-grid{grid-template-columns:1fr}
+}

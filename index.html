@@ -79,6 +79,8 @@
         <button id="navInstitutions" class="nav central-nav" data-view="lembaga">▣ Lembaga</button>
         <button class="nav" data-view="laporan">▥ Laporan</button>
         <button class="nav" data-view="analitik">⌁ Analitik</button>
+        <button id="navBudget" class="nav" data-view="anggaran">▧ Anggaran</button>
+        <button id="navClosing" class="nav central-nav" data-view="tutupbuku">▣ Tutup Buku</button>
         <button id="navUsers" class="nav central-nav" data-view="pengguna">♙ Pengguna</button>
         <button id="navAudit" class="nav central-nav" data-view="audit">◷ Audit Trail</button>
       </nav>
@@ -1120,6 +1122,8 @@
                   <option value="PROOF">Bukti Transaksi</option>
                   <option value="USER">Pengguna</option>
                   <option value="ACCOUNT">Akun Keuangan</option>
+                  <option value="BUDGET">Anggaran</option>
+                  <option value="PERIOD">Tutup Buku</option>
                 </select>
               </label>
 
@@ -1170,6 +1174,199 @@
             <div class="evidence-modal-actions">
               <button id="closeAuditModalBtn" class="brand-btn" type="button">Tutup</button>
             </div>
+          </div>
+        </div>
+
+
+        <div id="budgetSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">PERENCANAAN KEUANGAN</span>
+              <h1>Anggaran & Realisasi</h1>
+              <p id="budgetHeroText">Bandingkan plafon anggaran dengan pengeluaran aktual per kategori.</p>
+            </div>
+            <button id="newBudgetBtn" class="brand-btn" type="button">+ Tetapkan Anggaran</button>
+          </div>
+
+          <article class="panel report-filter-panel">
+            <div class="budget-filter-grid">
+              <label class="form-field">
+                <span>Tahun Anggaran</span>
+                <select id="budgetYear"></select>
+              </label>
+              <label class="form-field">
+                <span>Lembaga</span>
+                <select id="budgetInstitution">
+                  <option value="ALL">Semua Lembaga</option>
+                </select>
+              </label>
+              <button id="refreshBudgetBtn" class="secondary-btn budget-refresh-btn" type="button">↻ Perbarui</button>
+            </div>
+          </article>
+
+          <div class="module-stats report-stats">
+            <article class="mini-stat">
+              <span>Total Anggaran</span>
+              <strong id="budgetTotalAmount">Rp0</strong>
+              <small>Plafon pada filter aktif</small>
+            </article>
+            <article class="mini-stat">
+              <span>Realisasi</span>
+              <strong id="budgetRealizationAmount">Rp0</strong>
+              <small>Pengeluaran APPROVED</small>
+            </article>
+            <article class="mini-stat">
+              <span>Sisa Anggaran</span>
+              <strong id="budgetRemainingAmount">Rp0</strong>
+              <small>Dapat bernilai negatif</small>
+            </article>
+            <article class="mini-stat">
+              <span>Serapan</span>
+              <strong id="budgetAbsorptionPercent">0%</strong>
+              <small>Realisasi ÷ anggaran</small>
+            </article>
+          </div>
+
+          <div id="budgetAlert" class="budget-alert hidden"></div>
+
+          <div class="budget-layout">
+            <article id="budgetFormCard" class="panel form-panel">
+              <div class="panel-title">
+                <h3>Tetapkan / Ubah Anggaran</h3>
+                <p>Satu plafon per tahun, lembaga, dan kategori pengeluaran.</p>
+              </div>
+
+              <form id="budgetForm" class="finance-form">
+                <div class="form-grid">
+                  <label class="form-field">
+                    <span>Tahun</span>
+                    <select id="budgetFormYear" required></select>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Lembaga</span>
+                    <select id="budgetFormInstitution" required>
+                      <option value="">Pilih lembaga</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Kategori Pengeluaran</span>
+                    <select id="budgetFormCategory" required>
+                      <option value="">Pilih kategori</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Nilai Anggaran</span>
+                    <div class="money-input">
+                      <b>Rp</b>
+                      <input id="budgetFormAmount" type="number" min="0" step="1" placeholder="Contoh: 25000000" required>
+                    </div>
+                    <small id="budgetFormAmountPreview">Rp0</small>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Catatan</span>
+                    <textarea id="budgetFormNote" rows="3" placeholder="Opsional: keterangan penyusunan anggaran"></textarea>
+                  </label>
+                </div>
+
+                <div class="form-note">
+                  Jika kombinasi tahun + lembaga + kategori sudah ada, nilai lama akan diperbarui.
+                </div>
+
+                <div class="form-actions">
+                  <button id="saveBudgetBtn" class="brand-btn" type="submit">Simpan Anggaran</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel budget-table-panel">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Realisasi per Kategori</h3>
+                  <p>Hijau = aman, oranye = ≥80%, merah = melebihi anggaran.</p>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table class="income-table budget-table">
+                  <thead>
+                    <tr>
+                      <th>Lembaga</th>
+                      <th>Kategori</th>
+                      <th>Anggaran</th>
+                      <th>Realisasi</th>
+                      <th>Sisa</th>
+                      <th>Serapan</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="budgetTableBody">
+                    <tr><td colspan="7" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div id="closingSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">FINALISASI PERIODE</span>
+              <h1>Tutup Buku Bulanan</h1>
+              <p>Kunci bulan yang sudah selesai agar transaksi tidak dapat ditambah, diubah, dihapus, atau di-approve lagi.</p>
+            </div>
+          </div>
+
+          <div class="closing-warning">
+            <strong>Perhatian</strong>
+            <span>Sebelum menutup bulan, selesaikan semua transaksi DRAFT/SUBMITTED. Periode CLOSED akan diblokir langsung oleh database.</span>
+          </div>
+
+          <article class="panel report-filter-panel">
+            <div class="closing-filter-grid">
+              <label class="form-field">
+                <span>Tahun</span>
+                <select id="closingYear"></select>
+              </label>
+              <label class="form-field">
+                <span>Lembaga</span>
+                <select id="closingInstitution">
+                  <option value="">Pilih lembaga</option>
+                </select>
+              </label>
+              <button id="refreshClosingBtn" class="secondary-btn budget-refresh-btn" type="button">↻ Perbarui</button>
+            </div>
+          </article>
+
+          <div class="module-stats report-stats">
+            <article class="mini-stat">
+              <span>Bulan Ditutup</span>
+              <strong id="closedMonthsCount">0</strong>
+              <small>Dari 12 bulan</small>
+            </article>
+            <article class="mini-stat">
+              <span>Bulan Terbuka</span>
+              <strong id="openMonthsCount">12</strong>
+              <small>Masih dapat bertransaksi</small>
+            </article>
+            <article class="mini-stat">
+              <span>Transaksi Pending</span>
+              <strong id="closingPendingCount">0</strong>
+              <small>DRAFT / SUBMITTED tahun ini</small>
+            </article>
+            <article class="mini-stat">
+              <span>Periode Terakhir Ditutup</span>
+              <strong id="lastClosedPeriod">—</strong>
+              <small>Status final</small>
+            </article>
+          </div>
+
+          <div id="closingMonthsGrid" class="closing-month-grid">
+            <div class="empty">Pilih lembaga untuk melihat periode.</div>
           </div>
         </div>
 
