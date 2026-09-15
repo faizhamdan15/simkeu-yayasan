@@ -42,6 +42,7 @@ let analyticsInstitutionChart = null;
 
 let masterInstitutions = [];
 let usersRowsCache = [];
+let editingUserProfileId = null;
 
 let evidenceInstitutions = [];
 let evidenceRowsCache = [];
@@ -2027,25 +2028,113 @@ async function loadUsersModule(){
 
 function renderUsersTable(){
   $("usersTableBody").innerHTML=usersRowsCache.length
-    ? usersRowsCache.map(u=>`
+    ? usersRowsCache.map(u=>{
+      const isSelf=u.id===currentSession?.user?.id;
+      return `
       <tr>
-        <td><strong>${escapeHtml(u.full_name||'-')}</strong></td>
+        <td>
+          <strong>${escapeHtml(u.full_name||'-')}</strong>
+          ${isSelf?` <span class="user-self-chip">AKUN SAYA</span>`:""}
+        </td>
         <td><span class="role-chip">${escapeHtml(roleLabel(u.role))}</span></td>
         <td>${escapeHtml(u.institutions?.name||'-')}</td>
         <td>${escapeHtml(u.phone||'-')}</td>
         <td><span class="${u.is_active?'active-chip':'inactive-chip'}">${u.is_active?'AKTIF':'NONAKTIF'}</span></td>
         <td><div class="uid-cell" title="${escapeHtml(u.id)}">${escapeHtml(u.id)}</div></td>
-      </tr>`).join("")
-    : `<tr><td colspan="6" class="empty">Belum ada pengguna.</td></tr>`;
+        <td>
+          ${currentProfile?.role==="SUPER_ADMIN"
+            ? `<div class="user-action-wrap">
+                <button class="user-edit-btn" data-user-action="edit" data-id="${u.id}" type="button">Edit</button>
+               </div>`
+            : "-"}
+        </td>
+      </tr>`;
+    }).join("")
+    : `<tr><td colspan="7" class="empty">Belum ada pengguna.</td></tr>`;
+}
+
+function setUserProfileEditMode(active,user=null){
+  const isOwnSuperAdmin=active &&
+    user?.id===currentSession?.user?.id &&
+    user?.role==="SUPER_ADMIN";
+
+  $("userProfileFormCard").classList.toggle("user-form-editing",active);
+  $("userProfileFormTitle").textContent=active?"Edit Profil Pengguna":"Hubungkan Akun Login";
+  $("userProfileFormSubtitle").textContent=active
+    ? "Perbarui nama, nomor HP, role, lembaga, atau status akun."
+    : "Hanya Super Admin yang dapat menambah atau mengubah profil pengguna.";
+
+  $("profileUserId").disabled=active;
+  $("cancelUserEditBtn").classList.toggle("hidden",!active);
+  $("saveUserProfileBtn").textContent=active?"Simpan Perubahan":"Simpan Pengguna";
+
+  // Perlindungan akun Super Admin sendiri.
+  $("profileRole").disabled=isOwnSuperAdmin;
+  $("profileInstitution").disabled=isOwnSuperAdmin;
+  $("profileActiveStatus").disabled=isOwnSuperAdmin;
+
+  let note=document.getElementById("userEditProtectionNote");
+  if(note) note.remove();
+
+  if(isOwnSuperAdmin){
+    note=document.createElement("small");
+    note.id="userEditProtectionNote";
+    note.className="user-edit-note";
+    note.textContent="Untuk keamanan, akun Super Admin sendiri hanya dapat mengubah Nama Lengkap dan Nomor HP. Role, lembaga, dan status aktif dikunci.";
+    $("profileActiveStatus").closest(".form-field").appendChild(note);
+  }
 }
 
 function resetUserProfileForm(){
+  editingUserProfileId=null;
   $("userProfileForm").reset();
+  $("profileActiveStatus").value="true";
+  setUserProfileEditMode(false);
+}
+
+function startEditUserProfile(id){
+  if(currentProfile?.role!=="SUPER_ADMIN"){
+    throw new Error("Hanya Super Admin yang dapat mengedit pengguna.");
+  }
+
+  const user=usersRowsCache.find(u=>u.id===id);
+  if(!user) throw new Error("Profil pengguna tidak ditemukan.");
+
+  editingUserProfileId=user.id;
+  $("profileUserId").value=user.id;
+  $("profileFullName").value=user.full_name||"";
+  $("profileRole").value=user.role||"";
+  $("profileInstitution").value=user.institution_id||"";
+  $("profilePhone").value=user.phone||"";
+  $("profileActiveStatus").value=user.is_active===false?"false":"true";
+
+  setUserProfileEditMode(true,user);
+  $("userProfileFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+  setTimeout(()=>$("profileFullName").focus(),300);
+}
+
+async function refreshCurrentProfileIdentity(){
+  if(!currentSession?.user?.id) return;
+
+  currentProfile=await getProfile(currentSession.user.id);
+  const p=currentProfile;
+  const first=(p.full_name||"Pengguna").trim().split(/\s+/)[0];
+
+  $("userName").textContent=p.full_name||"Pengguna";
+  $("userRole").textContent=roleLabel(p.role);
+  $("avatar").textContent=first.charAt(0).toUpperCase();
+  $("welcomeName").textContent=first;
+  $("welcomeInstitution").textContent=
+    isCentralUser()
+      ? "Dashboard konsolidasi Yayasan dan seluruh lembaga"
+      : "Lembaga: "+(p.institutions?.name||"-");
+
+  applyRoleBasedUI();
 }
 
 async function saveUserProfile(){
   if(currentProfile?.role!=="SUPER_ADMIN"){
-    throw new Error("Hanya Super Admin yang dapat menambah pengguna.");
+    throw new Error("Hanya Super Admin yang dapat menambah atau mengedit pengguna.");
   }
 
   const id=$("profileUserId").value.trim();
@@ -2053,11 +2142,55 @@ async function saveUserProfile(){
   const role=$("profileRole").value;
   const institution_id=$("profileInstitution").value;
   const phone=$("profilePhone").value.trim();
+  const is_active=$("profileActiveStatus").value==="true";
 
   const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if(!uuidPattern.test(id)) throw new Error("UID tidak valid. Copy UID lengkap dari Supabase Authentication.");
   if(!full_name||!role||!institution_id) throw new Error("Nama, role, dan lembaga wajib diisi.");
-  if(role==="SUPER_ADMIN") throw new Error("Penambahan SUPER_ADMIN kedua tidak diizinkan dari form ini.");
+
+  // MODE EDIT
+  if(editingUserProfileId){
+    const target=usersRowsCache.find(u=>u.id===editingUserProfileId);
+    if(!target) throw new Error("Profil yang akan diedit tidak ditemukan.");
+
+    const isOwnSuperAdmin=
+      target.id===currentSession?.user?.id &&
+      target.role==="SUPER_ADMIN";
+
+    const effectiveRole=isOwnSuperAdmin?target.role:role;
+    const effectiveInstitution=isOwnSuperAdmin?target.institution_id:institution_id;
+    const effectiveActive=isOwnSuperAdmin?true:is_active;
+
+    if(!isOwnSuperAdmin && effectiveRole==="SUPER_ADMIN"){
+      throw new Error("Role SUPER_ADMIN tidak dapat diberikan ke akun lain dari menu ini.");
+    }
+
+    const {error}=await sb.rpc("update_simkeu_user_profile",{
+      p_user_id:editingUserProfileId,
+      p_full_name:full_name,
+      p_phone:phone||null,
+      p_role:effectiveRole,
+      p_institution_id:effectiveInstitution,
+      p_is_active:effectiveActive
+    });
+    if(error) throw error;
+
+    const editedSelf=editingUserProfileId===currentSession?.user?.id;
+    resetUserProfileForm();
+    await loadUsersModule();
+
+    if(editedSelf){
+      await refreshCurrentProfileIdentity();
+    }
+
+    toast("Profil pengguna berhasil diperbarui.");
+    return;
+  }
+
+  // MODE TAMBAH BARU
+  if(role==="SUPER_ADMIN"){
+    throw new Error("Penambahan SUPER_ADMIN kedua tidak diizinkan dari form ini.");
+  }
 
   const payload={
     id,
@@ -2065,7 +2198,7 @@ async function saveUserProfile(){
     role,
     institution_id,
     phone:phone||null,
-    is_active:true
+    is_active
   };
 
   const {error}=await sb.from("profiles").insert(payload);
@@ -4015,8 +4148,25 @@ $("refreshUsersBtn").addEventListener("click",async()=>{
 });
 
 $("newUserProfileBtn").addEventListener("click",()=>{
+  resetUserProfileForm();
   $("userProfileFormCard").scrollIntoView({behavior:"smooth",block:"start"});
   setTimeout(()=>$("profileUserId").focus(),300);
+});
+
+$("cancelUserEditBtn").addEventListener("click",resetUserProfileForm);
+
+$("usersTableBody").addEventListener("click",e=>{
+  const btn=e.target.closest("[data-user-action]");
+  if(!btn) return;
+
+  try{
+    if(btn.dataset.userAction==="edit"){
+      startEditUserProfile(btn.dataset.id);
+    }
+  }catch(err){
+    console.error(err);
+    toast("Aksi pengguna gagal: "+(err.message||"error"));
+  }
 });
 
 $("userProfileForm").addEventListener("submit",async e=>{

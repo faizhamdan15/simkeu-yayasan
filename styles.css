@@ -1279,3 +1279,63 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
 @media(max-width:520px){
   .income-storage-stats{grid-template-columns:1fr}
 }
+
+
+/* =========================================================
+   EDIT PROFIL PENGGUNA v6.8.2
+   ========================================================= */
+.user-edit-cancel{
+  width:auto;
+  margin:0;
+  height:40px;
+  padding:0 13px;
+}
+.user-form-editing{
+  outline:2px solid rgba(248,153,33,.24);
+  box-shadow:0 0 0 5px rgba(248,153,33,.06);
+}
+.user-edit-note{
+  display:block;
+  margin-top:4px;
+  font-size:8px;
+  line-height:1.45;
+  color:#9A6B32;
+}
+.user-action-wrap{
+  display:flex;
+  gap:6px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.user-edit-btn{
+  height:29px;
+  padding:0 9px;
+  border:1px solid #D7C7B5;
+  background:#FFF8EF;
+  color:#8A4D1A;
+  border-radius:8px;
+  font-size:8px;
+  font-weight:900;
+  cursor:pointer;
+}
+.user-edit-btn:hover{
+  background:#FFF0DA;
+}
+.user-self-chip{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 6px;
+  border-radius:999px;
+  background:#EEEAFB;
+  color:#62509A;
+  font-size:7px;
+  font-weight:900;
+}
+#profileUserId:disabled,
+#profileRole:disabled,
+#profileInstitution:disabled,
+#profileActiveStatus:disabled{
+  opacity:.72;
+  cursor:not-allowed;
+  background:#F3F1EE;
+}
