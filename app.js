@@ -36,6 +36,12 @@ let reportRowsCache = [];
 let lpjInstitutions = [];
 let lpjDataCache = null;
 
+let assetInstitutions=[];
+let assetCategories=[];
+let assetRowsCache=[];
+let assetExpenseRows=[];
+let editingAssetId=null;
+
 let analyticsInstitutions = [];
 let analyticsRowsCache = [];
 let analyticsCashflowChart = null;
@@ -1496,6 +1502,140 @@ async function rejectTransfer(id){
 
   await Promise.all([loadTransferModule(),loadDashboard()]);
   toast("Transfer internal ditolak.");
+}
+
+
+
+/* ==================== ASET & INVENTARIS v7.0 ==================== */
+function assetConditionLabel(v){return {GOOD:"Baik",LIGHT_DAMAGE:"Rusak Ringan",HEAVY_DAMAGE:"Rusak Berat"}[v]||v||"-"}
+function assetConditionClass(v){return {GOOD:"good",LIGHT_DAMAGE:"light",HEAVY_DAMAGE:"heavy"}[v]||""}
+function assetStatusLabel(v){return {ACTIVE:"Aktif",MAINTENANCE:"Maintenance",LOST:"Hilang",DISPOSED:"Dihapuskan"}[v]||v||"-"}
+function assetStatusClass(v){return {ACTIVE:"active",MAINTENANCE:"maintenance",LOST:"lost",DISPOSED:"disposed"}[v]||""}
+function movementLabel(v){return {REGISTERED:"Registrasi",MUTATION:"Mutasi",CONDITION_CHANGE:"Perubahan Kondisi",STATUS_CHANGE:"Perubahan Status",DISPOSAL:"Penghapusan",ADJUSTMENT:"Penyesuaian"}[v]||v}
+function canManageAssets(){return isCentralUser()||currentProfile?.role==="INSTITUTION_ADMIN"}
+
+async function loadAssetsModule(){
+  try{
+    if(!assetInstitutions.length||!assetCategories.length){
+      const [i,c]=await Promise.all([
+        sb.from("institutions").select("id,code,name,is_active").eq("is_active",true).order("name"),
+        sb.from("asset_categories").select("id,code,name,is_active").eq("is_active",true).order("name")
+      ]);
+      if(i.error)throw i.error;if(c.error)throw c.error;
+      assetInstitutions=i.data||[];assetCategories=c.data||[];
+    }
+    $("assetCategoryFilter").innerHTML=`<option value="ALL">Semua Kategori</option>`+assetCategories.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("");
+    $("assetCategory").innerHTML=`<option value="">Pilih kategori</option>`+assetCategories.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("");
+    if(isCentralUser()){
+      $("assetInstitutionFilter").innerHTML=`<option value="ALL">Semua Lembaga</option>`+assetInstitutions.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("");
+      $("assetInstitution").innerHTML=`<option value="">Pilih lembaga</option>`+assetInstitutions.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("");
+      $("assetInstitutionFilter").disabled=false;$("assetInstitution").disabled=false;
+    }else{
+      restrictInstitutionSelector("assetInstitutionFilter",assetInstitutions);
+      restrictInstitutionSelector("assetInstitution",assetInstitutions);
+    }
+    $("newAssetBtn").classList.toggle("hidden",!canManageAssets());
+    $("assetFormCard").classList.toggle("hidden",!canManageAssets());
+    if(canManageAssets()&&!$("assetAcquisitionDate").value)resetAssetForm();
+    await fetchAssets();
+  }catch(e){console.error(e);toast("Gagal memuat aset: "+(e.message||"error"))}
+}
+async function fetchAssets(){
+  let q=sb.from("assets").select(`id,asset_code,institution_id,asset_category_id,asset_name,description,brand_model,serial_number,quantity,unit,acquisition_date,acquisition_value,acquisition_transaction_id,location,custodian,asset_condition,status,notes,created_at,updated_at,institutions:institution_id(id,name,code),asset_categories:asset_category_id(id,name,code),acquisition_transaction:acquisition_transaction_id(id,transaction_number,transaction_date,amount,description)`).order("asset_code");
+  const inst=$("assetInstitutionFilter").value;if(inst&&inst!=="ALL")q=q.eq("institution_id",inst);
+  const {data,error}=await q;if(error)throw error;assetRowsCache=data||[];
+  renderAssets();await loadAssetExpenses();
+}
+async function loadAssetExpenses(){
+  const {data,error}=await sb.from("transactions").select(`id,transaction_number,transaction_date,institution_id,amount,description,expense_categories:expense_category_id(name)`).eq("transaction_type","EXPENSE").eq("status","APPROVED").order("transaction_date",{ascending:false}).limit(1500);
+  if(error)throw error;assetExpenseRows=data||[];refreshAssetExpenseOptions();
+}
+function filteredAssets(){
+  const c=$("assetCategoryFilter").value,k=$("assetConditionFilter").value,s=$("assetStatusFilter").value,t=($("assetSearch").value||"").toLowerCase().trim();
+  return assetRowsCache.filter(a=>{
+    const h=[a.asset_code,a.asset_name,a.brand_model,a.serial_number,a.location,a.custodian,a.institutions?.name,a.asset_categories?.name].filter(Boolean).join(" ").toLowerCase();
+    return(c==="ALL"||a.asset_category_id===c)&&(k==="ALL"||a.asset_condition===k)&&(s==="ALL"||a.status===s)&&(!t||h.includes(t));
+  });
+}
+function renderAssets(){
+  const rows=filteredAssets(),active=assetRowsCache.filter(a=>a.status!=="DISPOSED");
+  $("assetTotalQty").textContent=active.reduce((s,a)=>s+Number(a.quantity||0),0).toLocaleString("id-ID");
+  $("assetTotalValue").textContent=rupiah(assetRowsCache.reduce((s,a)=>s+Number(a.acquisition_value||0),0));
+  $("assetGoodCount").textContent=active.filter(a=>a.asset_condition==="GOOD").reduce((s,a)=>s+Number(a.quantity||0),0).toLocaleString("id-ID");
+  $("assetAttentionCount").textContent=active.filter(a=>a.asset_condition!=="GOOD"||["MAINTENANCE","LOST"].includes(a.status)).reduce((s,a)=>s+Number(a.quantity||0),0).toLocaleString("id-ID");
+  $("assetResultInfo").textContent=`${rows.length} record • ${rows.reduce((s,a)=>s+Number(a.quantity||0),0)} unit`;
+  $("assetTableBody").innerHTML=rows.length?rows.map(a=>`<tr>
+    <td><span class="asset-code-chip">${escapeHtml(a.asset_code)}</span></td>
+    <td><div class="asset-name-cell"><strong>${escapeHtml(a.asset_name)}</strong><span>${escapeHtml(a.asset_categories?.name||"-")} • ${a.quantity} ${escapeHtml(a.unit||"UNIT")}</span></div></td>
+    <td>${escapeHtml(a.institutions?.name||"-")}</td><td>${escapeHtml(a.location||"-")}</td><td><strong>${rupiah(a.acquisition_value)}</strong></td>
+    <td><span class="asset-condition ${assetConditionClass(a.asset_condition)}">${assetConditionLabel(a.asset_condition)}</span></td>
+    <td><span class="asset-status ${assetStatusClass(a.status)}">${assetStatusLabel(a.status)}</span></td>
+    <td><div class="asset-actions"><button class="asset-btn" data-aa="detail" data-id="${a.id}">Detail</button>${canManageAssets()?`<button class="asset-btn edit" data-aa="edit" data-id="${a.id}">Edit</button><button class="asset-btn move" data-aa="move" data-id="${a.id}">Mutasi</button>`:""}</div></td>
+  </tr>`).join(""):`<tr><td colspan="8" class="empty">Belum ada aset sesuai filter.</td></tr>`;
+}
+function setAssetEdit(active){
+  $("assetFormCard").classList.toggle("asset-form-editing",active);$("assetFormTitle").textContent=active?"Edit Data Aset":"Tambah Aset";$("saveAssetBtn").textContent=active?"Simpan Perubahan":"Simpan Aset";$("cancelAssetEditBtn").classList.toggle("hidden",!active);
+  $("assetInstitution").disabled=active||!isCentralUser();
+}
+function resetAssetForm(){
+  editingAssetId=null;["assetLocation","assetCustodian","assetCondition","assetStatus"].forEach(id=>$(id).disabled=false);
+  $("assetForm").reset();setAssetEdit(false);$("assetQuantity").value=1;$("assetUnit").value="UNIT";$("assetAcquisitionSource").value="TRANSACTION";$("assetAcquisitionDate").value=todayISO();$("assetAcquisitionValue").value=0;$("assetValuePreview").textContent="Rp0";$("assetCondition").value="GOOD";$("assetStatus").value="ACTIVE";
+  if(!isCentralUser()&&currentProfile?.institution_id){$("assetInstitution").value=currentProfile.institution_id;$("assetInstitution").disabled=true}
+  toggleAssetSource();refreshAssetExpenseOptions();
+}
+function toggleAssetSource(){const t=$("assetAcquisitionSource").value==="TRANSACTION";$("assetExpenseField").classList.toggle("hidden",!t);$("assetExpenseTransaction").required=t;if(!t)$("assetExpenseTransaction").value=""}
+function refreshAssetExpenseOptions(){
+  const i=$("assetInstitution").value,rows=assetExpenseRows.filter(t=>!i||t.institution_id===i);
+  $("assetExpenseTransaction").innerHTML=`<option value="">Pilih transaksi pengeluaran</option>`+rows.map(t=>`<option value="${t.id}">${formatDate(t.transaction_date)} • ${escapeHtml(t.transaction_number)} • ${rupiah(t.amount)}</option>`).join("");
+  $("assetExpenseTransaction").disabled=!i||!rows.length;
+}
+function applyAssetExpense(){
+  const t=assetExpenseRows.find(x=>x.id===$("assetExpenseTransaction").value);if(!t)return;
+  $("assetAcquisitionDate").value=t.transaction_date;$("assetAcquisitionValue").value=Number(t.amount||0);$("assetValuePreview").textContent=rupiah(t.amount);if(!$("assetDescription").value&&t.description)$("assetDescription").value=t.description;
+}
+function editAsset(id){
+  const a=assetRowsCache.find(x=>x.id===id);if(!a)throw new Error("Aset tidak ditemukan.");editingAssetId=id;setAssetEdit(true);
+  $("assetInstitution").value=a.institution_id;$("assetCategory").value=a.asset_category_id;$("assetName").value=a.asset_name||"";$("assetBrandModel").value=a.brand_model||"";$("assetSerialNumber").value=a.serial_number||"";$("assetQuantity").value=a.quantity;$("assetUnit").value=a.unit||"UNIT";
+  $("assetAcquisitionSource").value=a.acquisition_transaction_id?"TRANSACTION":"MANUAL";toggleAssetSource();refreshAssetExpenseOptions();$("assetExpenseTransaction").value=a.acquisition_transaction_id||"";$("assetAcquisitionDate").value=a.acquisition_date;$("assetAcquisitionValue").value=a.acquisition_value;$("assetValuePreview").textContent=rupiah(a.acquisition_value);$("assetLocation").value=a.location||"";$("assetCustodian").value=a.custodian||"";$("assetCondition").value=a.asset_condition;$("assetStatus").value=a.status;$("assetDescription").value=a.description||"";$("assetNotes").value=a.notes||"";
+  ["assetLocation","assetCustodian","assetCondition","assetStatus"].forEach(id=>$(id).disabled=true);$("assetFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+}
+async function saveAsset(){
+  const wasEditing=!!editingAssetId;
+  const p={institution_id:$("assetInstitution").value,asset_category_id:$("assetCategory").value,asset_name:$("assetName").value.trim(),description:$("assetDescription").value.trim()||null,brand_model:$("assetBrandModel").value.trim()||null,serial_number:$("assetSerialNumber").value.trim()||null,quantity:Number($("assetQuantity").value),unit:$("assetUnit").value.trim().toUpperCase(),acquisition_date:$("assetAcquisitionDate").value,acquisition_value:Number($("assetAcquisitionValue").value),acquisition_transaction_id:$("assetAcquisitionSource").value==="TRANSACTION"?$("assetExpenseTransaction").value:null,location:$("assetLocation").value.trim()||null,custodian:$("assetCustodian").value.trim()||null,condition:$("assetCondition").value,status:$("assetStatus").value,notes:$("assetNotes").value.trim()||null};
+  if(!p.institution_id||!p.asset_category_id||!p.asset_name||!p.acquisition_date||p.quantity<1)throw new Error("Lengkapi data wajib aset.");
+  if($("assetAcquisitionSource").value==="TRANSACTION"&&!p.acquisition_transaction_id)throw new Error("Pilih pengeluaran APPROVED terkait.");
+  if(editingAssetId){
+    const {error}=await sb.rpc("update_asset_master",{p_asset_id:editingAssetId,p_asset_category_id:p.asset_category_id,p_asset_name:p.asset_name,p_description:p.description,p_brand_model:p.brand_model,p_serial_number:p.serial_number,p_quantity:p.quantity,p_unit:p.unit,p_acquisition_date:p.acquisition_date,p_acquisition_value:p.acquisition_value,p_acquisition_transaction_id:p.acquisition_transaction_id,p_notes:p.notes});if(error)throw error;
+  }else{
+    const {error}=await sb.rpc("create_asset",{p_institution_id:p.institution_id,p_asset_category_id:p.asset_category_id,p_asset_name:p.asset_name,p_description:p.description,p_brand_model:p.brand_model,p_serial_number:p.serial_number,p_quantity:p.quantity,p_unit:p.unit,p_acquisition_date:p.acquisition_date,p_acquisition_value:p.acquisition_value,p_acquisition_transaction_id:p.acquisition_transaction_id,p_location:p.location,p_custodian:p.custodian,p_condition:p.condition,p_status:p.status,p_notes:p.notes});if(error)throw error;
+  }
+  resetAssetForm();await fetchAssets();toast(wasEditing?"Aset berhasil diperbarui.":"Aset berhasil dicatat.");
+}
+async function showAssetDetail(id){
+  const a=assetRowsCache.find(x=>x.id===id);if(!a)return;
+  const {data,error}=await sb.from("asset_movements").select("*").eq("asset_id",id).order("movement_date",{ascending:false}).order("created_at",{ascending:false});if(error)throw error;
+  $("assetDetailTitle").textContent=a.asset_name;$("assetDetailCode").textContent=a.asset_code;
+  $("assetDetailBody").innerHTML=`<div class="asset-detail-grid">
+    ${[["Lembaga",a.institutions?.name],["Kategori",a.asset_categories?.name],["Nilai Perolehan",rupiah(a.acquisition_value)],["Tanggal Perolehan",formatDate(a.acquisition_date)],["Jumlah",`${a.quantity} ${a.unit}`],["Merek / Model",a.brand_model||"-"],["Serial Number",a.serial_number||"-"],["Lokasi",a.location||"-"],["Penanggung Jawab",a.custodian||"-"],["Kondisi",assetConditionLabel(a.asset_condition)],["Status",assetStatusLabel(a.status)],["Catatan",a.notes||"-"]].map(x=>`<div class="asset-detail-box"><span>${x[0]}</span><strong>${escapeHtml(x[1]||"-")}</strong></div>`).join("")}
+    </div>
+    <div class="asset-source-note">${a.acquisition_transaction?`Terkait transaksi ${escapeHtml(a.acquisition_transaction.transaction_number)} • ${formatDate(a.acquisition_transaction.transaction_date)} • ${rupiah(a.acquisition_transaction.amount)}`:"Input manual / aset lama."}</div>
+    ${a.description?`<div class="asset-detail-title">Spesifikasi</div><div class="asset-source-note">${escapeHtml(a.description)}</div>`:""}
+    <div class="asset-detail-title">Riwayat Mutasi</div><div class="asset-history">${(data||[]).length?(data||[]).map(m=>`<div class="asset-history-row"><span>${formatDate(m.movement_date)}</span><strong>${movementLabel(m.movement_type)}</strong><div>${m.from_location!==m.to_location?`Lokasi: ${escapeHtml(m.from_location||"-")} → ${escapeHtml(m.to_location||"-")}<br>`:""}${m.old_condition!==m.new_condition?`Kondisi: ${assetConditionLabel(m.old_condition)} → ${assetConditionLabel(m.new_condition)}<br>`:""}${m.old_status!==m.new_status?`Status: ${assetStatusLabel(m.old_status)} → ${assetStatusLabel(m.new_status)}<br>`:""}${escapeHtml(m.note||"")}</div></div>`).join(""):`<div class="empty">Belum ada riwayat.</div>`}</div>`;
+  $("assetDetailModal").classList.remove("hidden");
+}
+function openMovement(id){
+  const a=assetRowsCache.find(x=>x.id===id);if(!a)throw new Error("Aset tidak ditemukan.");
+  $("assetMovementId").value=a.id;$("assetMovementCode").textContent=`${a.asset_code} • ${a.asset_name}`;$("assetMovementDate").value=todayISO();$("assetMovementLocation").value=a.location||"";$("assetMovementCustodian").value=a.custodian||"";$("assetMovementCondition").value=a.asset_condition;$("assetMovementStatus").value=a.status;$("assetMovementNote").value="";$("assetMovementModal").classList.remove("hidden");
+}
+async function saveMovement(){
+  const {error}=await sb.rpc("record_asset_movement",{p_asset_id:$("assetMovementId").value,p_movement_date:$("assetMovementDate").value,p_new_location:$("assetMovementLocation").value.trim()||null,p_new_custodian:$("assetMovementCustodian").value.trim()||null,p_new_condition:$("assetMovementCondition").value,p_new_status:$("assetMovementStatus").value,p_note:$("assetMovementNote").value.trim()});if(error)throw error;
+  $("assetMovementModal").classList.add("hidden");await fetchAssets();toast("Mutasi aset tersimpan.");
+}
+function exportAssetsCsv(){
+  const rows=filteredAssets();if(!rows.length){toast("Tidak ada aset untuk diekspor.");return}
+  const h=["Kode","Nama","Kategori","Lembaga","Jumlah","Satuan","Tanggal Perolehan","Nilai","Lokasi","Penanggung Jawab","Kondisi","Status","Serial Number","Merek/Model"];
+  const b=rows.map(a=>[a.asset_code,a.asset_name,a.asset_categories?.name||"",a.institutions?.name||"",a.quantity,a.unit,a.acquisition_date,a.acquisition_value,a.location||"",a.custodian||"",assetConditionLabel(a.asset_condition),assetStatusLabel(a.status),a.serial_number||"",a.brand_model||""]);
+  const csv="\uFEFF"+[h,...b].map(r=>r.map(csvCell).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}),u=URL.createObjectURL(blob),x=document.createElement("a");x.href=u;x.download=`Inventaris_SIMKEU_${todayISO()}.csv`;x.click();URL.revokeObjectURL(u);
 }
 
 
@@ -3325,7 +3465,10 @@ const AUDIT_ACTION_LABELS={
   BUDGET_CREATED:"Anggaran dibuat",
   BUDGET_UPDATED:"Anggaran diperbarui",
   PERIOD_CLOSED:"Periode ditutup",
-  PERIOD_REOPENED:"Periode dibuka kembali"
+  PERIOD_REOPENED:"Periode dibuka kembali",
+  ASSET_CREATED:"Aset dicatat",
+  ASSET_UPDATED:"Aset diperbarui",
+  ASSET_MOVEMENT:"Mutasi aset dicatat"
 };
 
 function auditActionLabel(action){
@@ -3339,6 +3482,7 @@ function auditCategory(action){
   if(a.startsWith("ACCOUNT_")) return "ACCOUNT";
   if(a.startsWith("BUDGET_")) return "BUDGET";
   if(a.startsWith("PERIOD_")) return "PERIOD";
+  if(a.startsWith("ASSET_")) return "ASSET";
   if(a.includes("SUBMITTED")||a.includes("APPROVED")||a.includes("REJECTED")||a.includes("VOIDED")||a.startsWith("APPROVAL_")) return "APPROVAL";
   if(a.startsWith("TRANSACTION_")) return "TRANSACTION";
   return "TRANSACTION";
@@ -3354,6 +3498,7 @@ function auditVisual(action){
   if(a.startsWith("BUDGET_")) return {icon:"▧",cls:"account"};
   if(a==="PERIOD_CLOSED") return {icon:"🔒",cls:"approval"};
   if(a==="PERIOD_REOPENED") return {icon:"↺",cls:"account"};
+  if(a.startsWith("ASSET_")) return {icon:"▦",cls:"account"};
   if(a.includes("SUBMITTED")) return {icon:"→",cls:"approval"};
   return {icon:"◷",cls:""};
 }
@@ -3466,6 +3611,15 @@ function auditDescription(row){
   if(action==="PERIOD_REOPENED"){
     const m=Number(d.period_month||0);
     return `Periode ${m>=1&&m<=12?MONTH_NAMES[m-1]:m} ${d.fiscal_year||""} dibuka kembali.${d.reason?` • ${d.reason}`:""}`;
+  }
+  if(action==="ASSET_CREATED"){
+    return `${d.asset_code||"Aset"} • ${d.asset_name||""} dicatat dengan nilai ${rupiah(Number(d.acquisition_value||0))}.`;
+  }
+  if(action==="ASSET_UPDATED"){
+    return `${d.asset_code||"Aset"} • data aset diperbarui.`;
+  }
+  if(action==="ASSET_MOVEMENT"){
+    return `${d.asset_code||"Aset"} • mutasi aset dicatat${d.note?` • ${d.note}`:""}.`;
   }
   return "Aktivitas sistem tercatat.";
 }
@@ -3618,7 +3772,8 @@ function renderAuditSummary(rows){
     ["USER","Pengguna"],
     ["ACCOUNT","Akun Keuangan"],
     ["BUDGET","Anggaran"],
-    ["PERIOD","Tutup Buku"]
+    ["PERIOD","Tutup Buku"],
+    ["ASSET","Aset & Inventaris"]
   ];
   const total=rows.length||1;
 
@@ -4509,6 +4664,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   const expenseVisible=!$("expenseSection").classList.contains("hidden");
   const transferVisible=!$("transferSection").classList.contains("hidden");
   const evidenceVisible=!$("evidenceSection").classList.contains("hidden");
+  const assetsVisible=!$("assetsSection").classList.contains("hidden");
   const reportVisible=!$("reportSection").classList.contains("hidden");
   const lpjVisible=!$("lpjSection").classList.contains("hidden");
   const analyticsVisible=!$("analyticsSection").classList.contains("hidden");
@@ -4521,6 +4677,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
   else if(transferVisible) await Promise.all([loadDashboard(),loadTransferModule()]);
   else if(evidenceVisible) await Promise.all([loadDashboard(),fetchEvidenceTransactions()]);
+  else if(assetsVisible) await Promise.all([loadDashboard(),fetchAssets()]);
   else if(reportVisible) await Promise.all([loadDashboard(),fetchReportTransactions()]);
   else if(lpjVisible) await Promise.all([loadDashboard(),fetchLPJData()]);
   else if(analyticsVisible) await Promise.all([loadDashboard(),fetchAnalyticsData()]);
@@ -4539,6 +4696,7 @@ const meta={
   pengeluaran:["Pengeluaran","Catatan dan approval pengeluaran"],
   transfer:["Transfer Internal","Perpindahan dana antar lembaga"],
   bukti:["Bukti Transaksi","Dokumentasi nota, kuitansi, dan invoice"],
+  aset:["Aset & Inventaris","Barang milik Yayasan dan lembaga"],
   lembaga:["Lembaga","Kelola unit di bawah Yayasan"],
   laporan:["Laporan","Rekap keuangan dan ekspor"],
   lpj:["LPJ Bulanan","Pertanggungjawaban keuangan per bulan dan lembaga"],
@@ -4575,6 +4733,7 @@ async function switchView(v){
   $("expenseSection").classList.toggle("hidden",v!=="pengeluaran");
   $("transferSection").classList.toggle("hidden",v!=="transfer");
   $("evidenceSection").classList.toggle("hidden",v!=="bukti");
+  $("assetsSection").classList.toggle("hidden",v!=="aset");
   $("reportSection").classList.toggle("hidden",v!=="laporan");
   $("lpjSection").classList.toggle("hidden",v!=="lpj");
   $("analyticsSection").classList.toggle("hidden",v!=="analitik");
@@ -4586,7 +4745,7 @@ async function switchView(v){
   $("executiveSection").classList.toggle("hidden",v!=="eksekutif");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","bukti","laporan","lpj","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","bukti","aset","laporan","lpj","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -4597,6 +4756,8 @@ async function switchView(v){
     await loadTransferModule();
   }else if(v==="bukti"){
     await loadEvidenceModule();
+  }else if(v==="aset"){
+    await loadAssetsModule();
   }else if(v==="laporan"){
     await loadReportModule();
   }else if(v==="lpj"){
@@ -4630,6 +4791,26 @@ function closeSidebar(){$("sidebar").classList.remove("open");$("backdrop").clas
 $("menuBtn").addEventListener("click",openSidebar);
 $("closeSidebar").addEventListener("click",closeSidebar);
 $("backdrop").addEventListener("click",closeSidebar);
+
+
+/* Asset events */
+["assetCategoryFilter","assetConditionFilter","assetStatusFilter"].forEach(id=>$(id).addEventListener("change",renderAssets));
+$("assetInstitutionFilter").addEventListener("change",async()=>{try{await fetchAssets()}catch(e){toast("Gagal memuat aset: "+e.message)}});
+$("assetSearch").addEventListener("input",renderAssets);
+$("newAssetBtn").addEventListener("click",()=>{resetAssetForm();$("assetFormCard").scrollIntoView({behavior:"smooth",block:"start"})});
+$("cancelAssetEditBtn").addEventListener("click",resetAssetForm);
+$("assetInstitution").addEventListener("change",refreshAssetExpenseOptions);
+$("assetAcquisitionSource").addEventListener("change",toggleAssetSource);
+$("assetExpenseTransaction").addEventListener("change",applyAssetExpense);
+$("assetAcquisitionValue").addEventListener("input",()=>{$("assetValuePreview").textContent=rupiah(Number($("assetAcquisitionValue").value||0))});
+$("assetForm").addEventListener("submit",async e=>{e.preventDefault();$("saveAssetBtn").disabled=true;try{await saveAsset()}catch(x){console.error(x);toast("Gagal menyimpan aset: "+x.message)}finally{$("saveAssetBtn").disabled=false}});
+$("assetTableBody").addEventListener("click",async e=>{const b=e.target.closest("[data-aa]");if(!b)return;try{if(b.dataset.aa==="detail")await showAssetDetail(b.dataset.id);if(b.dataset.aa==="edit")editAsset(b.dataset.id);if(b.dataset.aa==="move")openMovement(b.dataset.id)}catch(x){toast("Aksi aset gagal: "+x.message)}});
+$("closeAssetDetailBtn").addEventListener("click",()=>$("assetDetailModal").classList.add("hidden"));
+document.querySelector("[data-close-asset-detail]").addEventListener("click",()=>$("assetDetailModal").classList.add("hidden"));
+$("closeAssetMovementBtn").addEventListener("click",()=>$("assetMovementModal").classList.add("hidden"));
+document.querySelector("[data-close-asset-movement]").addEventListener("click",()=>$("assetMovementModal").classList.add("hidden"));
+$("assetMovementForm").addEventListener("submit",async e=>{e.preventDefault();try{await saveMovement()}catch(x){toast("Gagal menyimpan mutasi: "+x.message)}});
+$("exportAssetsBtn").addEventListener("click",exportAssetsCsv);
 
 /* Income events */
 $("cancelIncomeEditBtn").addEventListener("click",resetIncomeForm);

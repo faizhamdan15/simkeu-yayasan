@@ -77,6 +77,7 @@
         <button class="nav" data-view="pengeluaran">↑ Pengeluaran</button>
         <button id="navTransfer" class="nav" data-view="transfer">⇄ Transfer Internal</button>
         <button class="nav" data-view="bukti">▤ Bukti Transaksi</button>
+        <button id="navAssets" class="nav" data-view="aset">▦ Aset & Inventaris</button>
         <button id="navInstitutions" class="nav central-nav" data-view="lembaga">▣ Lembaga</button>
         <button class="nav" data-view="laporan">▥ Laporan</button>
         <button id="navLPJ" class="nav" data-view="lpj">▤ LPJ Bulanan</button>
@@ -691,6 +692,104 @@
           </div>
         </div>
 
+
+
+        <div id="assetsSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">BARANG MILIK YAYASAN & LEMBAGA</span>
+              <h1>Aset & Inventaris</h1>
+              <p>Kelola kode aset, nilai perolehan, lokasi, kondisi, penanggung jawab, dan riwayat mutasi.</p>
+            </div>
+            <div class="module-actions">
+              <button id="exportAssetsBtn" class="secondary-btn report-top-btn" type="button">↓ Export CSV</button>
+              <button id="newAssetBtn" class="brand-btn report-top-btn" type="button">+ Tambah Aset</button>
+            </div>
+          </div>
+
+          <div class="module-stats asset-stats">
+            <article class="mini-stat"><span>Total Inventaris</span><strong id="assetTotalQty">0</strong><small>Unit aktif</small></article>
+            <article class="mini-stat"><span>Nilai Perolehan</span><strong id="assetTotalValue">Rp0</strong><small>Nilai historis</small></article>
+            <article class="mini-stat"><span>Kondisi Baik</span><strong id="assetGoodCount">0</strong><small>Unit kondisi baik</small></article>
+            <article class="mini-stat warning"><span>Perlu Perhatian</span><strong id="assetAttentionCount">0</strong><small>Rusak / maintenance / hilang</small></article>
+          </div>
+
+          <article class="panel asset-filter-panel">
+            <div class="asset-filter-grid">
+              <label class="form-field"><span>Lembaga</span><select id="assetInstitutionFilter"><option value="ALL">Semua Lembaga</option></select></label>
+              <label class="form-field"><span>Kategori</span><select id="assetCategoryFilter"><option value="ALL">Semua Kategori</option></select></label>
+              <label class="form-field"><span>Kondisi</span><select id="assetConditionFilter"><option value="ALL">Semua Kondisi</option><option value="GOOD">Baik</option><option value="LIGHT_DAMAGE">Rusak Ringan</option><option value="HEAVY_DAMAGE">Rusak Berat</option></select></label>
+              <label class="form-field"><span>Status</span><select id="assetStatusFilter"><option value="ALL">Semua Status</option><option value="ACTIVE">Aktif</option><option value="MAINTENANCE">Maintenance</option><option value="LOST">Hilang</option><option value="DISPOSED">Dihapuskan</option></select></label>
+              <label class="form-field"><span>Pencarian</span><input id="assetSearch" type="search" placeholder="Kode, nama, lokasi, PJ..."></label>
+            </div>
+          </article>
+
+          <div class="asset-layout">
+            <article id="assetFormCard" class="panel form-panel">
+              <div class="panel-title"><h3 id="assetFormTitle">Tambah Aset</h3><p id="assetFormSubtitle">Hubungkan dengan pengeluaran APPROVED atau input aset lama secara manual.</p></div>
+              <form id="assetForm" class="finance-form">
+                <div class="form-grid">
+                  <label class="form-field"><span>Lembaga Pemilik</span><select id="assetInstitution" required><option value="">Pilih lembaga</option></select></label>
+                  <label class="form-field"><span>Kategori</span><select id="assetCategory" required><option value="">Pilih kategori</option></select></label>
+                  <label class="form-field full"><span>Nama Aset</span><input id="assetName" required placeholder="Contoh: Laptop ASUS Vivobook"></label>
+                  <label class="form-field"><span>Merek / Model</span><input id="assetBrandModel" placeholder="Opsional"></label>
+                  <label class="form-field"><span>Serial Number</span><input id="assetSerialNumber" placeholder="Opsional"></label>
+                  <label class="form-field"><span>Jumlah</span><input id="assetQuantity" type="number" min="1" value="1" required></label>
+                  <label class="form-field"><span>Satuan</span><input id="assetUnit" value="UNIT" required></label>
+                  <label class="form-field full"><span>Sumber Pencatatan</span><select id="assetAcquisitionSource"><option value="TRANSACTION">Dari Pengeluaran SIMKEU</option><option value="MANUAL">Input Manual / Aset Lama</option></select></label>
+                  <label id="assetExpenseField" class="form-field full"><span>Pengeluaran APPROVED Terkait</span><select id="assetExpenseTransaction"><option value="">Pilih transaksi pengeluaran</option></select><small id="assetExpenseHelp">Tanggal dan nilai transaksi akan diisikan sebagai nilai awal.</small></label>
+                  <label class="form-field"><span>Tanggal Perolehan</span><input id="assetAcquisitionDate" type="date" required></label>
+                  <label class="form-field"><span>Nilai Perolehan Total</span><div class="money-input"><b>Rp</b><input id="assetAcquisitionValue" type="number" min="0" value="0" required></div><small id="assetValuePreview">Rp0</small></label>
+                  <label class="form-field"><span>Lokasi / Ruangan</span><input id="assetLocation" placeholder="Contoh: Lab IPA"></label>
+                  <label class="form-field"><span>Penanggung Jawab</span><input id="assetCustodian" placeholder="Nama / unit"></label>
+                  <label class="form-field"><span>Kondisi</span><select id="assetCondition"><option value="GOOD">Baik</option><option value="LIGHT_DAMAGE">Rusak Ringan</option><option value="HEAVY_DAMAGE">Rusak Berat</option></select></label>
+                  <label class="form-field"><span>Status</span><select id="assetStatus"><option value="ACTIVE">Aktif</option><option value="MAINTENANCE">Maintenance</option><option value="LOST">Hilang</option><option value="DISPOSED">Dihapuskan</option></select></label>
+                  <label class="form-field full"><span>Deskripsi / Spesifikasi</span><textarea id="assetDescription" rows="2"></textarea></label>
+                  <label class="form-field full"><span>Catatan</span><textarea id="assetNotes" rows="2"></textarea></label>
+                </div>
+                <div class="form-note"><strong>Catatan:</strong> kode aset dibuat otomatis. Untuk perubahan lokasi, kondisi, status, atau penanggung jawab gunakan tombol <b>Mutasi</b> agar riwayat tetap tersimpan.</div>
+                <div class="form-actions"><button id="cancelAssetEditBtn" class="outline-btn correction-cancel hidden" type="button">Batal Edit</button><button id="saveAssetBtn" class="brand-btn" type="submit">Simpan Aset</button></div>
+              </form>
+            </article>
+
+            <article class="panel">
+              <div class="panel-title row-title"><div><h3>Daftar Inventaris</h3><p id="assetResultInfo">Memuat...</p></div></div>
+              <div class="table-wrap">
+                <table class="income-table asset-table">
+                  <thead><tr><th>Kode</th><th>Aset</th><th>Lembaga</th><th>Lokasi</th><th>Nilai</th><th>Kondisi</th><th>Status</th><th>Aksi</th></tr></thead>
+                  <tbody id="assetTableBody"><tr><td colspan="8" class="empty">Memuat...</td></tr></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div id="assetDetailModal" class="asset-modal hidden">
+          <div class="asset-modal-backdrop" data-close-asset-detail></div>
+          <div class="asset-modal-card">
+            <div class="asset-modal-head"><div><strong id="assetDetailTitle">Detail Aset</strong><span id="assetDetailCode">—</span></div><button id="closeAssetDetailBtn" class="modal-close-btn">×</button></div>
+            <div id="assetDetailBody" class="asset-modal-body"></div>
+          </div>
+        </div>
+
+        <div id="assetMovementModal" class="asset-modal hidden">
+          <div class="asset-modal-backdrop" data-close-asset-movement></div>
+          <div class="asset-modal-card asset-movement-card">
+            <div class="asset-modal-head"><div><strong>Mutasi / Perubahan Aset</strong><span id="assetMovementCode">—</span></div><button id="closeAssetMovementBtn" class="modal-close-btn">×</button></div>
+            <form id="assetMovementForm" class="asset-modal-body">
+              <input id="assetMovementId" type="hidden">
+              <div class="form-grid">
+                <label class="form-field"><span>Tanggal Mutasi</span><input id="assetMovementDate" type="date" required></label>
+                <label class="form-field"><span>Kondisi Baru</span><select id="assetMovementCondition"><option value="GOOD">Baik</option><option value="LIGHT_DAMAGE">Rusak Ringan</option><option value="HEAVY_DAMAGE">Rusak Berat</option></select></label>
+                <label class="form-field"><span>Lokasi Baru</span><input id="assetMovementLocation"></label>
+                <label class="form-field"><span>Penanggung Jawab Baru</span><input id="assetMovementCustodian"></label>
+                <label class="form-field full"><span>Status Baru</span><select id="assetMovementStatus"><option value="ACTIVE">Aktif</option><option value="MAINTENANCE">Maintenance</option><option value="LOST">Hilang</option><option value="DISPOSED">Dihapuskan</option></select></label>
+                <label class="form-field full"><span>Alasan / Catatan</span><textarea id="assetMovementNote" rows="3" required></textarea></label>
+              </div>
+              <div class="form-actions"><button id="saveAssetMovementBtn" class="brand-btn" type="submit">Simpan Mutasi</button></div>
+            </form>
+          </div>
+        </div>
 
         <div id="reportSection" class="module-section hidden">
           <div class="module-hero">
@@ -1423,6 +1522,7 @@
                   <option value="ACCOUNT">Akun Keuangan</option>
                   <option value="BUDGET">Anggaran</option>
                   <option value="PERIOD">Tutup Buku</option>
+                  <option value="ASSET">Aset & Inventaris</option>
                 </select>
               </label>
 
