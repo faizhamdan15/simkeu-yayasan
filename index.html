@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <div id="toast" class="toast"></div>
@@ -702,6 +703,7 @@
               <p>Kelola kode aset, nilai perolehan, lokasi, kondisi, penanggung jawab, dan riwayat mutasi.</p>
             </div>
             <div class="module-actions">
+              <button id="printAssetLabelsBtn" class="secondary-btn report-top-btn" type="button" disabled>▦ Cetak Label QR <span id="selectedAssetCount">(0)</span></button>
               <button id="exportAssetsBtn" class="secondary-btn report-top-btn" type="button">↓ Export CSV</button>
               <button id="newAssetBtn" class="brand-btn report-top-btn" type="button">+ Tambah Aset</button>
             </div>
@@ -753,11 +755,17 @@
             </article>
 
             <article class="panel">
-              <div class="panel-title row-title"><div><h3>Daftar Inventaris</h3><p id="assetResultInfo">Memuat...</p></div></div>
+              <div class="panel-title row-title">
+                <div><h3>Daftar Inventaris</h3><p id="assetResultInfo">Memuat...</p></div>
+                <div class="asset-selection-tools">
+                  <button id="selectFilteredAssetsBtn" class="asset-tool-btn" type="button">Pilih Semua Hasil Filter</button>
+                  <button id="clearSelectedAssetsBtn" class="asset-tool-btn" type="button">Bersihkan Pilihan</button>
+                </div>
+              </div>
               <div class="table-wrap">
                 <table class="income-table asset-table">
-                  <thead><tr><th>Kode</th><th>Aset</th><th>Lembaga</th><th>Lokasi</th><th>Nilai</th><th>Kondisi</th><th>Status</th><th>Aksi</th></tr></thead>
-                  <tbody id="assetTableBody"><tr><td colspan="8" class="empty">Memuat...</td></tr></tbody>
+                  <thead><tr><th class="asset-check-col">Pilih</th><th>Kode</th><th>Aset</th><th>Lembaga</th><th>Lokasi</th><th>Nilai</th><th>Kondisi</th><th>Status</th><th>Aksi</th></tr></thead>
+                  <tbody id="assetTableBody"><tr><td colspan="9" class="empty">Memuat...</td></tr></tbody>
                 </table>
               </div>
             </article>
@@ -788,6 +796,56 @@
               </div>
               <div class="form-actions"><button id="saveAssetMovementBtn" class="brand-btn" type="submit">Simpan Mutasi</button></div>
             </form>
+          </div>
+        </div>
+
+
+        <div id="assetLabelModal" class="asset-modal hidden">
+          <div class="asset-modal-backdrop" data-close-asset-label></div>
+          <div class="asset-modal-card asset-label-modal-card">
+            <div class="asset-modal-head">
+              <div>
+                <strong>Cetak Label QR Aset</strong>
+                <span id="assetLabelModalInfo">0 aset dipilih</span>
+              </div>
+              <button id="closeAssetLabelBtn" class="modal-close-btn" type="button">×</button>
+            </div>
+            <div class="asset-modal-body">
+              <div class="asset-label-settings">
+                <label class="form-field">
+                  <span>Ukuran Label</span>
+                  <select id="assetLabelSize">
+                    <option value="70x35">70 × 35 mm — Standar</option>
+                    <option value="50x30">50 × 30 mm — Kecil</option>
+                    <option value="100x50">100 × 50 mm — Besar</option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span>Informasi Lokasi</span>
+                  <select id="assetLabelShowLocation">
+                    <option value="YES">Tampilkan</option>
+                    <option value="NO">Sembunyikan</option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span>Nama Lembaga</span>
+                  <select id="assetLabelShowInstitution">
+                    <option value="YES">Tampilkan</option>
+                    <option value="NO">Sembunyikan</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="asset-label-note">
+                QR akan membuka halaman detail aset di SIMKEU. Data tetap dilindungi login dan RLS.
+              </div>
+
+              <div id="assetLabelPreview" class="asset-label-preview"></div>
+
+              <div class="form-actions">
+                <button id="confirmPrintAssetLabelsBtn" class="brand-btn" type="button">Cetak / Simpan PDF</button>
+              </div>
+            </div>
           </div>
         </div>
 

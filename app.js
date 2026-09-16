@@ -41,6 +41,8 @@ let assetCategories=[];
 let assetRowsCache=[];
 let assetExpenseRows=[];
 let editingAssetId=null;
+let selectedAssetIds=new Set();
+let pendingAssetDeepLinkHandled=false;
 
 let analyticsInstitutions = [];
 let analyticsRowsCache = [];
@@ -248,6 +250,7 @@ async function enterApp(session){
 
     applyRoleBasedUI();
     await loadDashboard();
+    await handleAssetDeepLink();
   }catch(err){
     console.error(err);
     await sb.auth.signOut();
@@ -1559,19 +1562,32 @@ function filteredAssets(){
 }
 function renderAssets(){
   const rows=filteredAssets(),active=assetRowsCache.filter(a=>a.status!=="DISPOSED");
+
+  // Bersihkan pilihan yang sudah tidak dapat diakses lagi.
+  const accessibleIds=new Set(assetRowsCache.map(a=>a.id));
+  [...selectedAssetIds].forEach(id=>{if(!accessibleIds.has(id))selectedAssetIds.delete(id)});
+
   $("assetTotalQty").textContent=active.reduce((s,a)=>s+Number(a.quantity||0),0).toLocaleString("id-ID");
   $("assetTotalValue").textContent=rupiah(assetRowsCache.reduce((s,a)=>s+Number(a.acquisition_value||0),0));
   $("assetGoodCount").textContent=active.filter(a=>a.asset_condition==="GOOD").reduce((s,a)=>s+Number(a.quantity||0),0).toLocaleString("id-ID");
   $("assetAttentionCount").textContent=active.filter(a=>a.asset_condition!=="GOOD"||["MAINTENANCE","LOST"].includes(a.status)).reduce((s,a)=>s+Number(a.quantity||0),0).toLocaleString("id-ID");
   $("assetResultInfo").textContent=`${rows.length} record • ${rows.reduce((s,a)=>s+Number(a.quantity||0),0)} unit`;
+
   $("assetTableBody").innerHTML=rows.length?rows.map(a=>`<tr>
+    <td class="asset-check-col"><input class="asset-row-check" data-asset-select="${a.id}" type="checkbox" ${selectedAssetIds.has(a.id)?"checked":""} aria-label="Pilih ${escapeHtml(a.asset_code)}"></td>
     <td><span class="asset-code-chip">${escapeHtml(a.asset_code)}</span></td>
     <td><div class="asset-name-cell"><strong>${escapeHtml(a.asset_name)}</strong><span>${escapeHtml(a.asset_categories?.name||"-")} • ${a.quantity} ${escapeHtml(a.unit||"UNIT")}</span></div></td>
     <td>${escapeHtml(a.institutions?.name||"-")}</td><td>${escapeHtml(a.location||"-")}</td><td><strong>${rupiah(a.acquisition_value)}</strong></td>
     <td><span class="asset-condition ${assetConditionClass(a.asset_condition)}">${assetConditionLabel(a.asset_condition)}</span></td>
     <td><span class="asset-status ${assetStatusClass(a.status)}">${assetStatusLabel(a.status)}</span></td>
-    <td><div class="asset-actions"><button class="asset-btn" data-aa="detail" data-id="${a.id}">Detail</button>${canManageAssets()?`<button class="asset-btn edit" data-aa="edit" data-id="${a.id}">Edit</button><button class="asset-btn move" data-aa="move" data-id="${a.id}">Mutasi</button>`:""}</div></td>
-  </tr>`).join(""):`<tr><td colspan="8" class="empty">Belum ada aset sesuai filter.</td></tr>`;
+    <td><div class="asset-actions">
+      <button class="asset-btn label" data-aa="label" data-id="${a.id}" type="button">Label</button>
+      <button class="asset-btn" data-aa="detail" data-id="${a.id}" type="button">Detail</button>
+      ${canManageAssets()?`<button class="asset-btn edit" data-aa="edit" data-id="${a.id}" type="button">Edit</button><button class="asset-btn move" data-aa="move" data-id="${a.id}" type="button">Mutasi</button>`:""}
+    </div></td>
+  </tr>`).join(""):`<tr><td colspan="9" class="empty">Belum ada aset sesuai filter.</td></tr>`;
+
+  updateAssetSelectionUI();
 }
 function setAssetEdit(active){
   $("assetFormCard").classList.toggle("asset-form-editing",active);$("assetFormTitle").textContent=active?"Edit Data Aset":"Tambah Aset";$("saveAssetBtn").textContent=active?"Simpan Perubahan":"Simpan Aset";$("cancelAssetEditBtn").classList.toggle("hidden",!active);
@@ -1631,6 +1647,220 @@ async function saveMovement(){
   const {error}=await sb.rpc("record_asset_movement",{p_asset_id:$("assetMovementId").value,p_movement_date:$("assetMovementDate").value,p_new_location:$("assetMovementLocation").value.trim()||null,p_new_custodian:$("assetMovementCustodian").value.trim()||null,p_new_condition:$("assetMovementCondition").value,p_new_status:$("assetMovementStatus").value,p_note:$("assetMovementNote").value.trim()});if(error)throw error;
   $("assetMovementModal").classList.add("hidden");await fetchAssets();toast("Mutasi aset tersimpan.");
 }
+
+function updateAssetSelectionUI(){
+  const count=selectedAssetIds.size;
+  $("selectedAssetCount").textContent=`(${count})`;
+  $("printAssetLabelsBtn").disabled=count===0;
+}
+
+function assetDeepLink(assetCode){
+  const url=new URL(window.location.href);
+  url.search="";
+  url.hash="";
+  url.searchParams.set("asset",assetCode);
+  return url.toString();
+}
+
+function createQrDataUrl(text,size=220){
+  if(typeof QRCode==="undefined"){
+    throw new Error("Library QR Code belum termuat. Periksa koneksi internet lalu refresh.");
+  }
+  const host=document.createElement("div");
+  host.style.position="fixed";
+  host.style.left="-9999px";
+  host.style.top="-9999px";
+  document.body.appendChild(host);
+
+  new QRCode(host,{
+    text,
+    width:size,
+    height:size,
+    colorDark:"#000000",
+    colorLight:"#ffffff",
+    correctLevel:QRCode.CorrectLevel.M
+  });
+
+  const canvas=host.querySelector("canvas");
+  const img=host.querySelector("img");
+  let dataUrl="";
+  if(canvas) dataUrl=canvas.toDataURL("image/png");
+  else if(img) dataUrl=img.src;
+  host.remove();
+
+  if(!dataUrl) throw new Error("QR Code gagal dibuat.");
+  return dataUrl;
+}
+
+function selectedAssets(){
+  return assetRowsCache.filter(a=>selectedAssetIds.has(a.id));
+}
+
+function selectAllFilteredAssets(){
+  filteredAssets().forEach(a=>selectedAssetIds.add(a.id));
+  renderAssets();
+  toast(`${selectedAssetIds.size} aset dipilih untuk label.`);
+}
+
+function clearSelectedAssets(){
+  selectedAssetIds.clear();
+  renderAssets();
+}
+
+function previewLabelHtml(a){
+  const qr=createQrDataUrl(assetDeepLink(a.asset_code),150);
+  const showInst=$("assetLabelShowInstitution").value==="YES";
+  const showLoc=$("assetLabelShowLocation").value==="YES";
+  return `<div class="asset-label-preview-card">
+    <div class="asset-label-preview-qr"><img src="${qr}" alt="QR ${escapeHtml(a.asset_code)}"></div>
+    <div class="asset-label-preview-info">
+      <div class="foundation">Yayasan Ar-Raudlah Kapedi</div>
+      <strong>${escapeHtml(a.asset_name)}</strong>
+      <div class="code">${escapeHtml(a.asset_code)}</div>
+      ${showInst?`<small>${escapeHtml(a.institutions?.name||"-")}</small>`:""}
+      ${showLoc?`<small>Lokasi: ${escapeHtml(a.location||"-")}</small>`:""}
+    </div>
+  </div>`;
+}
+
+function refreshAssetLabelPreview(){
+  const rows=selectedAssets();
+  $("assetLabelModalInfo").textContent=`${rows.length} aset dipilih`;
+  const previewRows=rows.slice(0,6);
+  try{
+    $("assetLabelPreview").innerHTML=previewRows.map(previewLabelHtml).join("")+
+      (rows.length>6?`<div class="asset-label-preview-card"><div class="asset-label-preview-info"><strong>+ ${rows.length-6} label lainnya</strong><small>Akan ikut dicetak.</small></div></div>`:"");
+  }catch(err){
+    console.error(err);
+    $("assetLabelPreview").innerHTML=`<div class="empty">${escapeHtml(err.message||"QR gagal dibuat.")}</div>`;
+  }
+}
+
+function openAssetLabelModal(ids=null){
+  if(Array.isArray(ids)){
+    selectedAssetIds.clear();
+    ids.forEach(id=>selectedAssetIds.add(id));
+    renderAssets();
+  }
+  if(!selectedAssetIds.size){
+    toast("Pilih minimal satu aset.");
+    return;
+  }
+  $("assetLabelModal").classList.remove("hidden");
+  refreshAssetLabelPreview();
+}
+
+function closeAssetLabelModal(){
+  $("assetLabelModal").classList.add("hidden");
+}
+
+function labelDimensions(){
+  const value=$("assetLabelSize").value;
+  const map={
+    "50x30":{w:50,h:30,qr:22,name:8,code:7.2,meta:5.5},
+    "70x35":{w:70,h:35,qr:27,name:9,code:8,meta:6},
+    "100x50":{w:100,h:50,qr:39,name:12,code:10,meta:7.5}
+  };
+  return map[value]||map["70x35"];
+}
+
+function printSelectedAssetLabels(){
+  const rows=selectedAssets();
+  if(!rows.length){
+    toast("Tidak ada aset yang dipilih.");
+    return;
+  }
+
+  const dim=labelDimensions();
+  const showInst=$("assetLabelShowInstitution").value==="YES";
+  const showLoc=$("assetLabelShowLocation").value==="YES";
+
+  let labels="";
+  try{
+    labels=rows.map(a=>{
+      const qr=createQrDataUrl(assetDeepLink(a.asset_code),220);
+      return `<div class="label">
+        <div class="qr"><img src="${qr}"></div>
+        <div class="info">
+          <div class="foundation">YAYASAN AR-RAUDLAH KAPEDI</div>
+          <div class="name">${escapeHtml(a.asset_name)}</div>
+          <div class="code">${escapeHtml(a.asset_code)}</div>
+          ${showInst?`<div class="meta">${escapeHtml(a.institutions?.name||"-")}</div>`:""}
+          ${showLoc?`<div class="meta">Lokasi: ${escapeHtml(a.location||"-")}</div>`:""}
+          <div class="scan">SCAN UNTUK DETAIL ASET</div>
+        </div>
+      </div>`;
+    }).join("");
+  }catch(err){
+    console.error(err);
+    toast("Gagal membuat QR: "+(err.message||"error"));
+    return;
+  }
+
+  const w=window.open("","_blank","width=1100,height=850");
+  if(!w){
+    toast("Browser memblokir jendela cetak. Izinkan pop-up untuk SIMKEU.");
+    return;
+  }
+
+  w.document.write(`<!doctype html>
+  <html>
+  <head>
+    <meta charset="utf-8">
+    <title>Label QR Aset SIMKEU</title>
+    <style>
+      @page{size:A4;margin:8mm}
+      *{box-sizing:border-box}
+      body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#111;background:#fff}
+      .sheet{display:flex;flex-wrap:wrap;align-content:flex-start;gap:3mm}
+      .label{
+        width:${dim.w}mm;height:${dim.h}mm;border:0.35mm solid #222;border-radius:2mm;
+        display:grid;grid-template-columns:${dim.qr}mm 1fr;gap:2mm;align-items:center;
+        padding:2mm;overflow:hidden;page-break-inside:avoid;background:#fff
+      }
+      .qr{width:${dim.qr}mm;height:${dim.qr}mm;display:grid;place-items:center}
+      .qr img{width:100%;height:100%;object-fit:contain}
+      .info{min-width:0;overflow:hidden}
+      .foundation{font-size:${dim.meta}px;font-weight:800;color:#A54E13;white-space:nowrap}
+      .name{font-size:${dim.name}px;font-weight:800;line-height:1.1;margin:1.2mm 0 .5mm;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+      .code{font-size:${dim.code}px;font-weight:900;letter-spacing:.04em;white-space:nowrap}
+      .meta{font-size:${dim.meta}px;margin-top:.4mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .scan{font-size:${max(4.5,dim.meta-0.5)}px;font-weight:800;color:#666;margin-top:.8mm}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style>
+  </head>
+  <body>
+    <div class="sheet">${labels}</div>
+    <script>window.onload=()=>setTimeout(()=>window.print(),300);<\/script>
+  </body>
+  </html>`);
+  w.document.close();
+}
+
+async function handleAssetDeepLink(){
+  if(pendingAssetDeepLinkHandled)return;
+
+  const params=new URLSearchParams(window.location.search);
+  const code=(params.get("asset")||"").trim();
+  if(!code)return;
+
+  pendingAssetDeepLinkHandled=true;
+
+  try{
+    await switchView("aset");
+    const target=assetRowsCache.find(a=>a.asset_code===code);
+    if(!target){
+      toast("Aset tidak ditemukan atau akun ini tidak memiliki akses.");
+      return;
+    }
+    await showAssetDetail(target.id);
+  }catch(err){
+    console.error(err);
+    toast("Gagal membuka QR aset: "+(err.message||"error"));
+  }
+}
+
 function exportAssetsCsv(){
   const rows=filteredAssets();if(!rows.length){toast("Tidak ada aset untuk diekspor.");return}
   const h=["Kode","Nama","Kategori","Lembaga","Jumlah","Satuan","Tanggal Perolehan","Nilai","Lokasi","Penanggung Jawab","Kondisi","Status","Serial Number","Merek/Model"];
@@ -4804,12 +5034,36 @@ $("assetAcquisitionSource").addEventListener("change",toggleAssetSource);
 $("assetExpenseTransaction").addEventListener("change",applyAssetExpense);
 $("assetAcquisitionValue").addEventListener("input",()=>{$("assetValuePreview").textContent=rupiah(Number($("assetAcquisitionValue").value||0))});
 $("assetForm").addEventListener("submit",async e=>{e.preventDefault();$("saveAssetBtn").disabled=true;try{await saveAsset()}catch(x){console.error(x);toast("Gagal menyimpan aset: "+x.message)}finally{$("saveAssetBtn").disabled=false}});
-$("assetTableBody").addEventListener("click",async e=>{const b=e.target.closest("[data-aa]");if(!b)return;try{if(b.dataset.aa==="detail")await showAssetDetail(b.dataset.id);if(b.dataset.aa==="edit")editAsset(b.dataset.id);if(b.dataset.aa==="move")openMovement(b.dataset.id)}catch(x){toast("Aksi aset gagal: "+x.message)}});
+$("assetTableBody").addEventListener("change",e=>{
+  const c=e.target.closest("[data-asset-select]");
+  if(!c)return;
+  if(c.checked)selectedAssetIds.add(c.dataset.assetSelect);
+  else selectedAssetIds.delete(c.dataset.assetSelect);
+  updateAssetSelectionUI();
+});
+
+$("assetTableBody").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-aa]");
+  if(!b)return;
+  try{
+    if(b.dataset.aa==="label")openAssetLabelModal([b.dataset.id]);
+    if(b.dataset.aa==="detail")await showAssetDetail(b.dataset.id);
+    if(b.dataset.aa==="edit")editAsset(b.dataset.id);
+    if(b.dataset.aa==="move")openMovement(b.dataset.id);
+  }catch(x){toast("Aksi aset gagal: "+x.message)}
+});
 $("closeAssetDetailBtn").addEventListener("click",()=>$("assetDetailModal").classList.add("hidden"));
 document.querySelector("[data-close-asset-detail]").addEventListener("click",()=>$("assetDetailModal").classList.add("hidden"));
 $("closeAssetMovementBtn").addEventListener("click",()=>$("assetMovementModal").classList.add("hidden"));
 document.querySelector("[data-close-asset-movement]").addEventListener("click",()=>$("assetMovementModal").classList.add("hidden"));
 $("assetMovementForm").addEventListener("submit",async e=>{e.preventDefault();try{await saveMovement()}catch(x){toast("Gagal menyimpan mutasi: "+x.message)}});
+$("selectFilteredAssetsBtn").addEventListener("click",selectAllFilteredAssets);
+$("clearSelectedAssetsBtn").addEventListener("click",clearSelectedAssets);
+$("printAssetLabelsBtn").addEventListener("click",()=>openAssetLabelModal());
+$("closeAssetLabelBtn").addEventListener("click",closeAssetLabelModal);
+document.querySelector("[data-close-asset-label]").addEventListener("click",closeAssetLabelModal);
+["assetLabelSize","assetLabelShowLocation","assetLabelShowInstitution"].forEach(id=>$(id).addEventListener("change",refreshAssetLabelPreview));
+$("confirmPrintAssetLabelsBtn").addEventListener("click",printSelectedAssetLabels);
 $("exportAssetsBtn").addEventListener("click",exportAssetsCsv);
 
 /* Income events */
