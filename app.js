@@ -33,6 +33,12 @@ let editingTransferId = null;
 let reportInstitutions = [];
 let reportRowsCache = [];
 
+let cashBookInstitutions = [];
+let cashBookAccounts = [];
+let cashBookTransactionsCache = [];
+let cashBookEntriesCache = [];
+let cashBookOpeningBalance = 0;
+
 let lpjInstitutions = [];
 let lpjDataCache = null;
 
@@ -1866,6 +1872,433 @@ function exportAssetsCsv(){
   const h=["Kode","Nama","Kategori","Lembaga","Jumlah","Satuan","Tanggal Perolehan","Nilai","Lokasi","Penanggung Jawab","Kondisi","Status","Serial Number","Merek/Model"];
   const b=rows.map(a=>[a.asset_code,a.asset_name,a.asset_categories?.name||"",a.institutions?.name||"",a.quantity,a.unit,a.acquisition_date,a.acquisition_value,a.location||"",a.custodian||"",assetConditionLabel(a.asset_condition),assetStatusLabel(a.status),a.serial_number||"",a.brand_model||""]);
   const csv="\uFEFF"+[h,...b].map(r=>r.map(csvCell).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}),u=URL.createObjectURL(blob),x=document.createElement("a");x.href=u;x.download=`Inventaris_SIMKEU_${todayISO()}.csv`;x.click();URL.revokeObjectURL(u);
+}
+
+
+
+/* =========================================================
+   BUKU KAS AKTUAL v7.2
+   ========================================================= */
+
+function cashBookInstitutionName(id){
+  if(id==="ALL") return "Konsolidasi Seluruh Lembaga";
+  return cashBookInstitutions.find(i=>i.id===id)?.name || "Lembaga";
+}
+
+function cashBookAccountName(id){
+  if(id==="ALL") return "Semua Akun";
+  const a=cashBookAccounts.find(x=>x.id===id);
+  return a ? `${a.account_name} (${storageTypeLabel(a.account_type)})` : "Akun";
+}
+
+async function loadCashBookModule(){
+  try{
+    if(!$("cashBookDateFrom").value) $("cashBookDateFrom").value=firstDayOfCurrentMonth();
+    if(!$("cashBookDateTo").value) $("cashBookDateTo").value=todayISO();
+
+    if(!cashBookInstitutions.length){
+      const {data,error}=await sb.from("institutions")
+        .select("id,code,name,institution_type")
+        .eq("is_active",true)
+        .order("name");
+      if(error) throw error;
+      cashBookInstitutions=data||[];
+
+      if(isCentralUser()){
+        $("cashBookInstitution").innerHTML=
+          `<option value="ALL">Semua Lembaga (Konsolidasi)</option>`+
+          cashBookInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
+
+        const own=currentProfile?.institution_id;
+        if(own && cashBookInstitutions.some(i=>i.id===own)){
+          $("cashBookInstitution").value=own;
+        }
+        $("cashBookInstitution").disabled=false;
+      }else{
+        restrictInstitutionSelector("cashBookInstitution",cashBookInstitutions);
+      }
+    }
+
+    if(!cashBookAccounts.length){
+      const {data,error}=await sb.from("accounts")
+        .select("id,institution_id,account_name,account_type,opening_balance,is_active")
+        .order("institution_id")
+        .order("account_name");
+      if(error) throw error;
+      cashBookAccounts=data||[];
+    }
+
+    populateCashBookAccountOptions();
+    await fetchCashBookData();
+  }catch(err){
+    console.error(err);
+    $("cashBookBody").innerHTML=`<tr><td colspan="9" class="empty">Gagal memuat Buku Kas.</td></tr>`;
+    toast("Gagal memuat Buku Kas: "+(err.message||"error"));
+  }
+}
+
+function populateCashBookAccountOptions(){
+  const institution=$("cashBookInstitution").value||"ALL";
+  const current=$("cashBookAccount").value||"ALL";
+
+  if(institution==="ALL"){
+    $("cashBookAccount").innerHTML=`<option value="ALL">Semua Akun (Konsolidasi)</option>`;
+    $("cashBookAccount").value="ALL";
+    $("cashBookAccount").disabled=true;
+    return;
+  }
+
+  const accounts=cashBookAccounts.filter(a=>a.institution_id===institution);
+  $("cashBookAccount").innerHTML=
+    `<option value="ALL">Semua Akun Lembaga</option>`+
+    accounts.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)} — ${escapeHtml(storageTypeLabel(a.account_type))}${a.is_active===false?" (Nonaktif)":""}</option>`).join("");
+
+  $("cashBookAccount").disabled=false;
+  $("cashBookAccount").value=accounts.some(a=>a.id===current)?current:"ALL";
+}
+
+async function fetchCashBookApprovedTransactions(toDate){
+  const pageSize=1000;
+  let offset=0;
+  let all=[];
+
+  for(let page=0;page<50;page++){
+    const {data,error}=await sb.from("transactions")
+      .select(`
+        id,
+        transaction_number,
+        transaction_date,
+        transaction_type,
+        institution_id,
+        amount,
+        description,
+        status,
+        created_at,
+        fund_sources:fund_source_id(name),
+        expense_categories:expense_category_id(name),
+        source_account:source_account_id(id,account_name,account_type,institution_id),
+        destination_account:destination_account_id(id,account_name,account_type,institution_id)
+      `)
+      .eq("status","APPROVED")
+      .lte("transaction_date",toDate)
+      .order("transaction_date",{ascending:true})
+      .order("created_at",{ascending:true})
+      .range(offset,offset+pageSize-1);
+
+    if(error) throw error;
+
+    const batch=data||[];
+    all.push(...batch);
+    if(batch.length<pageSize) break;
+    offset+=pageSize;
+  }
+
+  return all;
+}
+
+function cashBookTransferDescription(row){
+  const srcInst=cashBookInstitutionName(row.source_account?.institution_id);
+  const dstInst=cashBookInstitutionName(row.destination_account?.institution_id);
+  const srcAcc=row.source_account?.account_name||"Akun sumber";
+  const dstAcc=row.destination_account?.account_name||"Akun tujuan";
+  const base=(row.description||"Transfer internal").trim();
+  return `${base} (${srcInst} / ${srcAcc} → ${dstInst} / ${dstAcc})`;
+}
+
+function buildCashBookMovements(rows,institutionId,accountId){
+  const movements=[];
+
+  const pushMovement=(row,kind,account,category,description)=>{
+    if(!account) return;
+    movements.push({
+      id:`${row.id}-${kind}-${account.id}`,
+      transaction_id:row.id,
+      transaction_number:row.transaction_number||"-",
+      transaction_date:row.transaction_date,
+      created_at:row.created_at||"",
+      category,
+      description:description||row.description||"-",
+      account_id:account.id,
+      account_name:account.account_name||"-",
+      account_type:account.account_type||"OTHER",
+      debit:kind==="DEBIT"?Number(row.amount||0):0,
+      credit:kind==="CREDIT"?Number(row.amount||0):0
+    });
+  };
+
+  for(const row of rows){
+    const src=row.source_account;
+    const dst=row.destination_account;
+    const srcInst=src?.institution_id||null;
+    const dstInst=dst?.institution_id||null;
+
+    if(accountId!=="ALL"){
+      if(row.transaction_type==="INCOME" && dst?.id===accountId){
+        pushMovement(row,"DEBIT",dst,
+          `Pemasukan • ${row.fund_sources?.name||"Sumber Pemasukan"}`,
+          row.description||"-");
+      }else if(row.transaction_type==="EXPENSE" && src?.id===accountId){
+        pushMovement(row,"CREDIT",src,
+          `Pengeluaran • ${row.expense_categories?.name||"Kategori Pengeluaran"}`,
+          row.description||"-");
+      }else if(row.transaction_type==="TRANSFER"){
+        if(dst?.id===accountId){
+          pushMovement(row,"DEBIT",dst,"Transfer Masuk",cashBookTransferDescription(row));
+        }
+        if(src?.id===accountId){
+          pushMovement(row,"CREDIT",src,"Transfer Keluar",cashBookTransferDescription(row));
+        }
+      }
+      continue;
+    }
+
+    // Konsolidasi seluruh lembaga: transfer internal kelompok tidak mengubah saldo total.
+    if(institutionId==="ALL"){
+      if(row.transaction_type==="INCOME" && dst){
+        pushMovement(row,"DEBIT",dst,
+          `Pemasukan • ${row.fund_sources?.name||"Sumber Pemasukan"}`,
+          row.description||"-");
+      }else if(row.transaction_type==="EXPENSE" && src){
+        pushMovement(row,"CREDIT",src,
+          `Pengeluaran • ${row.expense_categories?.name||"Kategori Pengeluaran"}`,
+          row.description||"-");
+      }
+      continue;
+    }
+
+    // Semua akun pada satu lembaga.
+    if(row.transaction_type==="INCOME" && dstInst===institutionId){
+      pushMovement(row,"DEBIT",dst,
+        `Pemasukan • ${row.fund_sources?.name||"Sumber Pemasukan"}`,
+        row.description||"-");
+    }else if(row.transaction_type==="EXPENSE" && srcInst===institutionId){
+      pushMovement(row,"CREDIT",src,
+        `Pengeluaran • ${row.expense_categories?.name||"Kategori Pengeluaran"}`,
+        row.description||"-");
+    }else if(row.transaction_type==="TRANSFER"){
+      // Mutasi antarakun milik lembaga yang sama tidak mengubah saldo lembaga.
+      if(srcInst===institutionId && dstInst===institutionId) continue;
+
+      if(dstInst===institutionId){
+        pushMovement(row,"DEBIT",dst,"Transfer Masuk",cashBookTransferDescription(row));
+      }else if(srcInst===institutionId){
+        pushMovement(row,"CREDIT",src,"Transfer Keluar",cashBookTransferDescription(row));
+      }
+    }
+  }
+
+  movements.sort((a,b)=>{
+    const da=(a.transaction_date||"").localeCompare(b.transaction_date||"");
+    if(da!==0) return da;
+    const ca=(a.created_at||"").localeCompare(b.created_at||"");
+    if(ca!==0) return ca;
+    return (a.transaction_number||"").localeCompare(b.transaction_number||"");
+  });
+
+  return movements;
+}
+
+function cashBookOpeningBase(institutionId,accountId){
+  let accounts=cashBookAccounts;
+
+  if(accountId!=="ALL"){
+    accounts=accounts.filter(a=>a.id===accountId);
+  }else if(institutionId!=="ALL"){
+    accounts=accounts.filter(a=>a.institution_id===institutionId);
+  }
+
+  return accounts.reduce((sum,a)=>sum+Number(a.opening_balance||0),0);
+}
+
+function calculateCashBook(){
+  const from=$("cashBookDateFrom").value;
+  const to=$("cashBookDateTo").value;
+  const institution=$("cashBookInstitution").value||"ALL";
+  const account=$("cashBookAccount").value||"ALL";
+
+  if(!from||!to) throw new Error("Tanggal awal dan akhir wajib diisi.");
+  if(from>to) throw new Error("Tanggal awal tidak boleh melewati tanggal akhir.");
+
+  const allMovements=buildCashBookMovements(cashBookTransactionsCache,institution,account);
+  const before=allMovements.filter(x=>x.transaction_date<from);
+  const period=allMovements.filter(x=>x.transaction_date>=from && x.transaction_date<=to);
+
+  cashBookOpeningBalance=cashBookOpeningBase(institution,account)+
+    before.reduce((s,x)=>s+Number(x.debit||0)-Number(x.credit||0),0);
+
+  let running=cashBookOpeningBalance;
+  cashBookEntriesCache=period.map(x=>{
+    running+=Number(x.debit||0)-Number(x.credit||0);
+    return {...x,balance:running};
+  });
+
+  renderCashBook();
+}
+
+async function fetchCashBookData(){
+  $("cashBookBody").innerHTML=`<tr><td colspan="9" class="empty">Memuat Buku Kas...</td></tr>`;
+
+  const from=$("cashBookDateFrom").value;
+  const to=$("cashBookDateTo").value;
+  if(!from||!to) throw new Error("Tanggal awal dan akhir wajib diisi.");
+  if(from>to) throw new Error("Tanggal awal tidak boleh melewati tanggal akhir.");
+
+  cashBookTransactionsCache=await fetchCashBookApprovedTransactions(to);
+  calculateCashBook();
+}
+
+function renderCashBook(){
+  const rows=cashBookEntriesCache;
+  const debit=rows.reduce((s,r)=>s+Number(r.debit||0),0);
+  const credit=rows.reduce((s,r)=>s+Number(r.credit||0),0);
+  const closing=cashBookOpeningBalance+debit-credit;
+
+  $("cashBookOpening").textContent=rupiah(cashBookOpeningBalance);
+  $("cashBookDebit").textContent=rupiah(debit);
+  $("cashBookCredit").textContent=rupiah(credit);
+  $("cashBookClosing").textContent=rupiah(closing);
+
+  const institution=$("cashBookInstitution").value||"ALL";
+  const account=$("cashBookAccount").value||"ALL";
+  $("cashBookResultInfo").textContent=
+    `${cashBookInstitutionName(institution)} • ${cashBookAccountName(account)} • `+
+    `${formatDate($("cashBookDateFrom").value)} s.d. ${formatDate($("cashBookDateTo").value)} • ${rows.length} mutasi`;
+
+  const openingRow=`
+    <tr class="cash-book-opening-row">
+      <td>—</td>
+      <td>${formatDate($("cashBookDateFrom").value)}</td>
+      <td>—</td>
+      <td><strong>Saldo Awal</strong></td>
+      <td>Saldo sebelum periode terpilih</td>
+      <td>${escapeHtml(cashBookAccountName(account))}</td>
+      <td class="money-col">—</td>
+      <td class="money-col">—</td>
+      <td class="money-col"><strong>${rupiah(cashBookOpeningBalance)}</strong></td>
+    </tr>`;
+
+  const movementRows=rows.map((r,i)=>`
+    <tr>
+      <td>${i+1}</td>
+      <td>${formatDate(r.transaction_date)}</td>
+      <td><strong>${escapeHtml(r.transaction_number)}</strong></td>
+      <td><span class="cash-book-category">${escapeHtml(r.category)}</span></td>
+      <td><span class="report-description" title="${escapeHtml(r.description)}">${escapeHtml(r.description)}</span></td>
+      <td>
+        <div class="cash-book-account-cell">
+          <strong>${escapeHtml(r.account_name)}</strong>
+          <small>${escapeHtml(storageTypeLabel(r.account_type))}</small>
+        </div>
+      </td>
+      <td class="money-col cash-book-debit">${r.debit?rupiah(r.debit):"—"}</td>
+      <td class="money-col cash-book-credit">${r.credit?rupiah(r.credit):"—"}</td>
+      <td class="money-col cash-book-balance"><strong>${rupiah(r.balance)}</strong></td>
+    </tr>`).join("");
+
+  $("cashBookBody").innerHTML=openingRow+
+    (movementRows||`<tr><td colspan="9" class="empty">Tidak ada mutasi APPROVED pada periode ini.</td></tr>`);
+}
+
+function exportCashBookCsv(){
+  const institution=$("cashBookInstitution").value||"ALL";
+  const account=$("cashBookAccount").value||"ALL";
+
+  const header=["No","Tanggal","No Transaksi","Kategori","Keterangan","Akun","Debet","Kredit","Saldo"];
+  const body=[
+    ["",$("cashBookDateFrom").value,"","Saldo Awal","Saldo sebelum periode terpilih",cashBookAccountName(account),"","",cashBookOpeningBalance],
+    ...cashBookEntriesCache.map((r,i)=>[
+      i+1,r.transaction_date,r.transaction_number,r.category,r.description,r.account_name,
+      Number(r.debit||0)||"",Number(r.credit||0)||"",Number(r.balance||0)
+    ])
+  ];
+
+  const csv="\uFEFF"+[header,...body].map(row=>row.map(csvCell).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`Buku_Kas_${cashBookInstitutionName(institution).replaceAll(" ","_")}_${$("cashBookDateFrom").value}_${$("cashBookDateTo").value}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast("Buku Kas CSV berhasil dibuat.");
+}
+
+function printCashBook(){
+  const institution=$("cashBookInstitution").value||"ALL";
+  const account=$("cashBookAccount").value||"ALL";
+  const debit=cashBookEntriesCache.reduce((s,r)=>s+Number(r.debit||0),0);
+  const credit=cashBookEntriesCache.reduce((s,r)=>s+Number(r.credit||0),0);
+  const closing=cashBookOpeningBalance+debit-credit;
+
+  const rowsHtml=`
+    <tr class="opening">
+      <td></td>
+      <td>${formatDate($("cashBookDateFrom").value)}</td>
+      <td></td>
+      <td>Saldo Awal</td>
+      <td>Saldo sebelum periode terpilih</td>
+      <td>${escapeHtml(cashBookAccountName(account))}</td>
+      <td></td><td></td>
+      <td class="num">${rupiah(cashBookOpeningBalance)}</td>
+    </tr>`+
+    cashBookEntriesCache.map((r,i)=>`
+      <tr>
+        <td>${i+1}</td>
+        <td>${formatDate(r.transaction_date)}</td>
+        <td>${escapeHtml(r.transaction_number)}</td>
+        <td>${escapeHtml(r.category)}</td>
+        <td>${escapeHtml(r.description)}</td>
+        <td>${escapeHtml(r.account_name)}</td>
+        <td class="num">${r.debit?rupiah(r.debit):""}</td>
+        <td class="num">${r.credit?rupiah(r.credit):""}</td>
+        <td class="num">${rupiah(r.balance)}</td>
+      </tr>`).join("");
+
+  const w=window.open("","_blank");
+  if(!w){toast("Pop-up diblokir. Izinkan pop-up untuk mencetak.");return}
+
+  w.document.write(`<!doctype html>
+  <html><head><meta charset="utf-8"><title>Buku Kas Aktual</title>
+  <style>
+    @page{size:A4 landscape;margin:12mm}
+    body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}
+    h1{margin:0;text-align:center;font-size:17px}
+    h2{margin:4px 0 0;text-align:center;font-size:13px}
+    .meta{text-align:center;margin:6px 0 14px;color:#444}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+    .box{border:1px solid #bbb;padding:8px}.box span{display:block;font-size:8px;color:#666}.box strong{font-size:12px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border:1px solid #aaa;padding:5px;vertical-align:top}
+    th{background:#eee;text-align:center}
+    .num{text-align:right;white-space:nowrap}
+    .opening{font-weight:bold;background:#fff7e9}
+    .note{font-size:8px;margin-top:8px;color:#555}
+  </style></head><body>
+    <h1>BUKU KAS UMUM AKTUAL</h1>
+    <h2>YAYASAN AR-RAUDLAH KAPEDI</h2>
+    <div class="meta">
+      ${escapeHtml(cashBookInstitutionName(institution))} • ${escapeHtml(cashBookAccountName(account))}<br>
+      Periode ${formatDate($("cashBookDateFrom").value)} s.d. ${formatDate($("cashBookDateTo").value)}
+    </div>
+    <div class="summary">
+      <div class="box"><span>Saldo Awal</span><strong>${rupiah(cashBookOpeningBalance)}</strong></div>
+      <div class="box"><span>Total Debet</span><strong>${rupiah(debit)}</strong></div>
+      <div class="box"><span>Total Kredit</span><strong>${rupiah(credit)}</strong></div>
+      <div class="box"><span>Saldo Akhir</span><strong>${rupiah(closing)}</strong></div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>No.</th><th>Tanggal</th><th>No. Transaksi</th><th>Kategori</th><th>Keterangan</th>
+        <th>Akun</th><th>Debet</th><th>Kredit</th><th>Saldo</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <div class="note">Buku Kas hanya memuat transaksi APPROVED. Transaksi Draft, Submitted, Rejected, dan Void tidak memengaruhi saldo.</div>
+    <script>window.onload=()=>window.print();<\/script>
+  </body></html>`);
+  w.document.close();
 }
 
 
@@ -4896,6 +5329,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   const evidenceVisible=!$("evidenceSection").classList.contains("hidden");
   const assetsVisible=!$("assetsSection").classList.contains("hidden");
   const reportVisible=!$("reportSection").classList.contains("hidden");
+  const cashBookVisible=!$("cashBookSection").classList.contains("hidden");
   const lpjVisible=!$("lpjSection").classList.contains("hidden");
   const analyticsVisible=!$("analyticsSection").classList.contains("hidden");
   const auditVisible=!$("auditSection").classList.contains("hidden");
@@ -4909,6 +5343,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   else if(evidenceVisible) await Promise.all([loadDashboard(),fetchEvidenceTransactions()]);
   else if(assetsVisible) await Promise.all([loadDashboard(),fetchAssets()]);
   else if(reportVisible) await Promise.all([loadDashboard(),fetchReportTransactions()]);
+  else if(cashBookVisible) await Promise.all([loadDashboard(),fetchCashBookData()]);
   else if(lpjVisible) await Promise.all([loadDashboard(),fetchLPJData()]);
   else if(analyticsVisible) await Promise.all([loadDashboard(),fetchAnalyticsData()]);
   else if(auditVisible) await Promise.all([loadDashboard(),fetchAuditLogs()]);
@@ -4929,6 +5364,7 @@ const meta={
   aset:["Aset & Inventaris","Barang milik Yayasan dan lembaga"],
   lembaga:["Lembaga","Kelola unit di bawah Yayasan"],
   laporan:["Laporan","Rekap keuangan dan ekspor"],
+  bukukas:["Buku Kas Aktual","Debet, Kredit, Saldo, dan mutasi kas APPROVED"],
   lpj:["LPJ Bulanan","Pertanggungjawaban keuangan per bulan dan lembaga"],
   analitik:["Analitik","Diagram, tren, dan persentase"],
   pengguna:["Pengguna","Kelola akun dan hak akses"],
@@ -4965,6 +5401,7 @@ async function switchView(v){
   $("evidenceSection").classList.toggle("hidden",v!=="bukti");
   $("assetsSection").classList.toggle("hidden",v!=="aset");
   $("reportSection").classList.toggle("hidden",v!=="laporan");
+  $("cashBookSection").classList.toggle("hidden",v!=="bukukas");
   $("lpjSection").classList.toggle("hidden",v!=="lpj");
   $("analyticsSection").classList.toggle("hidden",v!=="analitik");
   $("institutionsSection").classList.toggle("hidden",v!=="lembaga");
@@ -4975,7 +5412,7 @@ async function switchView(v){
   $("executiveSection").classList.toggle("hidden",v!=="eksekutif");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","bukti","aset","laporan","lpj","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","bukti","aset","laporan","bukukas","lpj","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -4990,6 +5427,8 @@ async function switchView(v){
     await loadAssetsModule();
   }else if(v==="laporan"){
     await loadReportModule();
+  }else if(v==="bukukas"){
+    await loadCashBookModule();
   }else if(v==="lpj"){
     await loadLPJModule();
   }else if(v==="analitik"){
@@ -5330,6 +5769,31 @@ $("userProfileForm").addEventListener("submit",async e=>{
     $("saveUserProfileBtn").disabled=false;
   }
 });
+
+/* Cash Book events */
+$("applyCashBookFilterBtn").addEventListener("click",async()=>{
+  try{
+    await fetchCashBookData();
+    toast("Buku Kas diperbarui.");
+  }catch(err){
+    console.error(err);
+    toast("Gagal menerapkan Buku Kas: "+(err.message||"error"));
+  }
+});
+$("cashBookInstitution").addEventListener("change",()=>{
+  try{
+    populateCashBookAccountOptions();
+    calculateCashBook();
+  }catch(err){
+    console.error(err);
+    toast("Gagal mengganti lembaga: "+(err.message||"error"));
+  }
+});
+$("cashBookAccount").addEventListener("change",()=>{
+  try{calculateCashBook()}catch(err){console.error(err);toast("Gagal mengganti akun: "+(err.message||"error"))}
+});
+$("exportCashBookCsvBtn").addEventListener("click",exportCashBookCsv);
+$("printCashBookBtn").addEventListener("click",printCashBook);
 
 /* Report events */
 $("applyReportFilterBtn").addEventListener("click",async()=>{

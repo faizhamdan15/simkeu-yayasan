@@ -81,6 +81,7 @@
         <button id="navAssets" class="nav" data-view="aset">▦ Aset & Inventaris</button>
         <button id="navInstitutions" class="nav central-nav" data-view="lembaga">▣ Lembaga</button>
         <button class="nav" data-view="laporan">▥ Laporan</button>
+        <button id="navCashBook" class="nav" data-view="bukukas">▤ Buku Kas Aktual</button>
         <button id="navLPJ" class="nav" data-view="lpj">▤ LPJ Bulanan</button>
         <button class="nav" data-view="analitik">⌁ Analitik</button>
         <button id="navBudget" class="nav" data-view="anggaran">▧ Anggaran</button>
@@ -948,6 +949,108 @@
                 </thead>
                 <tbody id="reportTransactionsBody">
                   <tr><td colspan="8" class="empty">Memuat...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+
+        <div id="cashBookSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">BUKU KAS UMUM AKTUAL</span>
+              <h1>Buku Kas Aktual</h1>
+              <p>Mutasi kas berdasarkan transaksi APPROVED dengan format Debet, Kredit, dan Saldo berjalan.</p>
+            </div>
+            <div class="module-actions">
+              <button id="exportCashBookCsvBtn" class="secondary-btn report-top-btn" type="button">↓ Export CSV</button>
+              <button id="printCashBookBtn" class="brand-btn report-top-btn" type="button">Cetak / PDF</button>
+            </div>
+          </div>
+
+          <article class="panel report-filter-panel">
+            <div class="cash-book-filter-grid">
+              <label class="form-field">
+                <span>Dari Tanggal</span>
+                <input id="cashBookDateFrom" type="date">
+              </label>
+              <label class="form-field">
+                <span>Sampai Tanggal</span>
+                <input id="cashBookDateTo" type="date">
+              </label>
+              <label class="form-field">
+                <span>Lembaga</span>
+                <select id="cashBookInstitution">
+                  <option value="ALL">Semua Lembaga</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>Akun Kas</span>
+                <select id="cashBookAccount">
+                  <option value="ALL">Semua Akun</option>
+                </select>
+              </label>
+              <button id="applyCashBookFilterBtn" class="brand-btn filter-btn" type="button">Terapkan</button>
+            </div>
+            <div class="cash-book-rule">
+              <strong>Aktual:</strong> hanya transaksi berstatus <b>APPROVED</b> yang masuk Buku Kas.
+              Draft, Submitted, Rejected, dan Void tidak memengaruhi saldo. Pada mode <b>Semua Akun</b>,
+              transfer antar akun dalam lembaga yang sama tidak dihitung sebagai pemasukan/pengeluaran.
+            </div>
+          </article>
+
+          <div class="module-stats cash-book-stats">
+            <article class="mini-stat">
+              <span>Saldo Awal</span>
+              <strong id="cashBookOpening">Rp0</strong>
+              <small>Saldo sebelum periode terpilih</small>
+            </article>
+            <article class="mini-stat">
+              <span>Total Debet</span>
+              <strong id="cashBookDebit">Rp0</strong>
+              <small>Dana masuk selama periode</small>
+            </article>
+            <article class="mini-stat">
+              <span>Total Kredit</span>
+              <strong id="cashBookCredit">Rp0</strong>
+              <small>Dana keluar selama periode</small>
+            </article>
+            <article class="mini-stat">
+              <span>Saldo Akhir</span>
+              <strong id="cashBookClosing">Rp0</strong>
+              <small>Saldo aktual akhir periode</small>
+            </article>
+          </div>
+
+          <article class="panel cash-book-panel">
+            <div class="panel-title row-title">
+              <div>
+                <h3>Buku Kas Umum</h3>
+                <p id="cashBookResultInfo">Memuat buku kas...</p>
+              </div>
+              <div class="cash-book-legend">
+                <span><i class="cash-book-dot debit"></i> Debet = dana masuk</span>
+                <span><i class="cash-book-dot credit"></i> Kredit = dana keluar</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="cash-book-table">
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>Tanggal</th>
+                    <th>No. Transaksi</th>
+                    <th>Kategori</th>
+                    <th>Keterangan</th>
+                    <th>Akun</th>
+                    <th class="money-col">Debet</th>
+                    <th class="money-col">Kredit</th>
+                    <th class="money-col">Saldo</th>
+                  </tr>
+                </thead>
+                <tbody id="cashBookBody">
+                  <tr><td colspan="9" class="empty">Memuat...</td></tr>
                 </tbody>
               </table>
             </div>
