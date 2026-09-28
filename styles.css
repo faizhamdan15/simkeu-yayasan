@@ -1225,7 +1225,7 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
    CASH vs REKENING + BUKU BESAR v6.8
    ========================================================= */
 .balance-composition{
-  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
   gap:13px;margin-bottom:15px
 }
 .balance-composition-card{
@@ -1247,7 +1247,7 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
 .ledger-card{background:#FFF9F1;border-color:#EDD7BA}
 .ledger-card .balance-composition-icon{background:#F89921;color:#1F160C;font-weight:950}
 
-.income-storage-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
+.income-storage-stats{grid-template-columns:repeat(6,minmax(0,1fr))}
 .storage-cash-stat:before{background:#2F855A}
 .storage-bank-stat:before{background:#3B82F6}
 
@@ -1679,4 +1679,69 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
   .cash-book-filter-grid,.cash-book-stats{grid-template-columns:1fr}
   .cash-book-filter-grid .filter-btn{grid-column:auto}
   .cash-book-legend{width:100%}
+}
+
+
+.deposit-card .balance-composition-icon{background:#F4EDFF;color:#6D4CA5;font-weight:950}
+.storage-deposit-stat:before{background:#7C5AA6}
+.storage-chip.deposit{background:#F4EDFF;color:#6D4CA5}
+
+/* =========================================================
+   DEPOSITO & PENEMPATAN DANA v7.3
+   ========================================================= */
+.deposit-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+.deposit-layout{
+  display:grid;
+  grid-template-columns:minmax(360px,.78fr) minmax(0,1.6fr);
+  gap:15px;
+  margin-bottom:14px;
+}
+.deposit-filters{
+  grid-template-columns:minmax(210px,1.4fr) minmax(150px,.7fr)!important;
+}
+.deposit-table{min-width:1040px}
+.deposit-movement-table{min-width:900px}
+.deposit-movement-panel{margin-top:14px}
+.deposit-account-cell,.deposit-date-cell{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:135px;
+}
+.deposit-account-cell strong,.deposit-date-cell strong{font-size:8.5px;color:#312A24}
+.deposit-account-cell span,.deposit-date-cell span{font-size:7.2px;color:#93887E;line-height:1.35}
+.deposit-current-balance{color:#5C438A}
+.deposit-status{
+  display:inline-flex;
+  padding:4px 7px;
+  border-radius:999px;
+  font-size:7.5px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.deposit-status.active{background:#EAF7EF;color:#247147}
+.deposit-status.matured{background:#FFF2DD;color:#9A5B13}
+.deposit-status.closed{background:#EEEFF2;color:#59606B}
+.deposit-movement-kind{
+  display:inline-flex;
+  padding:4px 7px;
+  border-radius:999px;
+  background:#F4EDFF;
+  color:#6D4CA5;
+  font-size:7.5px;
+  font-weight:900;
+  white-space:nowrap;
+}
+
+@media(max-width:1200px){
+  .balance-composition{grid-template-columns:repeat(2,1fr)}
+  .deposit-layout{grid-template-columns:1fr}
+  .deposit-stats{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:720px){
+  .deposit-stats{grid-template-columns:1fr 1fr}
+  .deposit-filters{grid-template-columns:1fr!important}
+}
+@media(max-width:520px){
+  .deposit-stats{grid-template-columns:1fr}
 }
