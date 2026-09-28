@@ -786,7 +786,7 @@ function fillExpenseMasterOptions(){
 function refreshExpenseAccountOptions(){
   const institutionId=$("expenseInstitution").value;
   const accountSelect=$("expenseSourceAccount");
-  const rows=expenseAccounts.filter(a=>a.institution_id===institutionId);
+  const rows=expenseAccounts.filter(a=>a.institution_id===institutionId && a.account_type!=="DEPOSIT");
 
   accountSelect.innerHTML=`<option value="">Pilih akun sumber</option>`+
     rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
@@ -1009,6 +1009,9 @@ async function saveExpense(action){
   const selectedAccount=expenseAccounts.find(a=>a.id===source_account_id);
   if(!selectedAccount || selectedAccount.institution_id!==institution_id){
     throw new Error("Akun sumber tidak sesuai dengan lembaga yang dipilih.");
+  }
+  if(selectedAccount.account_type==="DEPOSIT"){
+    throw new Error("Dana deposito harus dicairkan ke rekening melalui Transfer Internal sebelum digunakan sebagai pengeluaran.");
   }
 
   if(editingExpenseId){
