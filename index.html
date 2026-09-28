@@ -871,10 +871,10 @@
             <div>
               <span class="module-kicker">REKAP KEUANGAN</span>
               <h1>Laporan</h1>
-              <p>Filter transaksi berdasarkan periode, lembaga, jenis transaksi, dan status.</p>
+              <p>Filter transaksi berdasarkan periode, lembaga, jenis, kategori pengeluaran, dan status.</p>
             </div>
             <div class="module-actions">
-              <button id="exportReportCsvBtn" class="secondary-btn report-top-btn" type="button">↓ Export CSV</button>
+              <button id="exportReportCsvBtn" class="secondary-btn report-top-btn" type="button">↓ Detail CSV</button>
               <button id="printReportBtn" class="brand-btn report-top-btn" type="button">Cetak / PDF</button>
             </div>
           </div>
@@ -902,6 +902,12 @@
                   <option value="INCOME">Pemasukan</option>
                   <option value="EXPENSE">Pengeluaran</option>
                   <option value="TRANSFER">Transfer Internal</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>Kategori Pengeluaran</span>
+                <select id="reportCategory">
+                  <option value="ALL">Semua Kategori</option>
                 </select>
               </label>
               <label class="form-field">
@@ -940,7 +946,42 @@
               <strong id="reportNetTotal">Rp0</strong>
               <small>Pemasukan − Pengeluaran</small>
             </article>
+            <article class="mini-stat report-top-category-stat">
+              <span>Kategori Terbesar</span>
+              <strong id="reportTopCategoryName">—</strong>
+              <small id="reportTopCategoryAmount">Belum ada pengeluaran Approved</small>
+            </article>
           </div>
+
+          <article class="panel report-category-panel">
+            <div class="panel-title row-title">
+              <div>
+                <h3>Rekap Pengeluaran per Kategori</h3>
+                <p id="reportCategoryInfo">Rekap transaksi pengeluaran APPROVED berdasarkan kategori.</p>
+              </div>
+              <button id="exportCategoryRecapBtn" class="secondary-btn report-top-btn" type="button">↓ Download Rekap Kategori</button>
+            </div>
+            <div class="report-category-highlight" id="reportCategoryHighlight">
+              Pilih periode dan lembaga untuk melihat kategori dengan pengeluaran terbesar.
+            </div>
+            <div class="table-wrap">
+              <table class="report-category-table">
+                <thead>
+                  <tr>
+                    <th>Peringkat</th>
+                    <th>Kategori</th>
+                    <th>Jumlah Transaksi</th>
+                    <th>Total Pengeluaran</th>
+                    <th>Persentase</th>
+                    <th>Transaksi Terbesar</th>
+                  </tr>
+                </thead>
+                <tbody id="reportCategorySummaryBody">
+                  <tr><td colspan="6" class="empty">Memuat rekap kategori...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
 
           <article class="panel">
             <div class="panel-title row-title">
