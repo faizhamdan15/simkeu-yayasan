@@ -37,6 +37,7 @@ let depositTransferRows = [];
 let editingDepositId = null;
 
 let reportInstitutions = [];
+let reportCategories = [];
 let reportRowsCache = [];
 
 let cashBookInstitutions = [];
@@ -2645,6 +2646,17 @@ async function loadReportModule(){
       }
     }
 
+    if(!reportCategories.length){
+      const {data,error}=await sb.from("expense_categories")
+        .select("id,code,name,is_active")
+        .eq("is_active",true)
+        .order("name");
+      if(error) throw error;
+      reportCategories=data||[];
+      $("reportCategory").innerHTML=`<option value="ALL">Semua Kategori</option>`+
+        reportCategories.map(cat=>`<option value="${cat.id}">${escapeHtml(cat.name)}</option>`).join("");
+    }
+
     await fetchReportTransactions();
   }catch(err){
     console.error(err);
@@ -2667,6 +2679,7 @@ async function fetchReportTransactions(){
       transaction_date,
       transaction_type,
       institution_id,
+      expense_category_id,
       amount,
       description,
       status,
