@@ -2571,7 +2571,7 @@ function printCashBook(){
   if(!w){toast("Pop-up diblokir. Izinkan pop-up untuk mencetak.");return}
 
   w.document.write(`<!doctype html>
-  <html><head><meta charset="utf-8"><title>Buku Kas Aktual</title>
+  <html><head><meta charset="utf-8"><title>Buku Kas Umum</title>
   <style>
     @page{size:A4 landscape;margin:12mm}
     body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}
@@ -2587,7 +2587,7 @@ function printCashBook(){
     .opening{font-weight:bold;background:#fff7e9}
     .note{font-size:8px;margin-top:8px;color:#555}
   </style></head><body>
-    <h1>BUKU KAS UMUM AKTUAL</h1>
+    <h1>BUKU KAS UMUM</h1>
     <h2>YAYASAN AR-RAUDLAH KAPEDI</h2>
     <div class="meta">
       ${escapeHtml(cashBookInstitutionName(institution))} • ${escapeHtml(cashBookAccountName(account))}<br>
@@ -5678,7 +5678,7 @@ const meta={
   aset:["Aset & Inventaris","Barang milik Yayasan dan lembaga"],
   lembaga:["Lembaga","Kelola unit di bawah Yayasan"],
   laporan:["Laporan","Rekap keuangan dan ekspor"],
-  bukukas:["Buku Kas Aktual","Debet, Kredit, Saldo, dan mutasi kas APPROVED"],
+  bukukas:["Buku Kas Umum","Debet, Kredit, Saldo, dan mutasi kas APPROVED"],
   lpj:["LPJ Bulanan","Pertanggungjawaban keuangan per bulan dan lembaga"],
   analitik:["Analitik","Diagram, tren, dan persentase"],
   pengguna:["Pengguna","Kelola akun dan hak akses"],
