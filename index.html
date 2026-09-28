@@ -77,6 +77,7 @@
         <button class="nav" data-view="pemasukan">↓ Pemasukan</button>
         <button class="nav" data-view="pengeluaran">↑ Pengeluaran</button>
         <button id="navTransfer" class="nav" data-view="transfer">⇄ Transfer Internal</button>
+        <button id="navDeposit" class="nav" data-view="deposito">◆ Deposito</button>
         <button class="nav" data-view="bukti">▤ Bukti Transaksi</button>
         <button id="navAssets" class="nav" data-view="aset">▦ Aset & Inventaris</button>
         <button id="navInstitutions" class="nav central-nav" data-view="lembaga">▣ Lembaga</button>
@@ -175,12 +176,20 @@
                 <small>Saldo pada akun bertipe BANK</small>
               </div>
             </article>
+            <article class="balance-composition-card deposit-card">
+              <div class="balance-composition-icon">◆</div>
+              <div>
+                <span>Total Deposito</span>
+                <strong id="totalDepositBalance">Rp0</strong>
+                <small>Dana pada akun bertipe DEPOSIT</small>
+              </div>
+            </article>
             <article class="balance-composition-card ledger-card">
               <div class="balance-composition-icon">Σ</div>
               <div>
                 <span>Total Buku Besar</span>
                 <strong id="ledgerGrandBalance">Rp0</strong>
-                <small>Cash + Rekening = satu kesatuan saldo</small>
+                <small>Cash + Rekening + Deposito + Deposito = satu kesatuan saldo</small>
               </div>
             </article>
           </div>
@@ -198,7 +207,7 @@
 
           <div class="grid two lower">
             <article class="panel">
-              <div class="panel-title"><h3>Saldo per Lembaga</h3><p>Kas dan rekening bank</p></div>
+              <div class="panel-title"><h3>Saldo per Lembaga</h3><p>Kas, rekening bank, dan deposito</p></div>
               <div id="institutionBalances" class="institution-list"></div>
             </article>
 
@@ -240,7 +249,7 @@
             <article class="mini-stat">
               <span>Pemasukan Bulan Ini</span>
               <strong id="incomeModuleApproved">Rp0</strong>
-              <small>Total Cash + Rekening</small>
+              <small>Total Cash + Rekening + Deposito</small>
             </article>
             <article class="mini-stat storage-cash-stat">
               <span>Masuk ke Cash</span>
@@ -250,6 +259,11 @@
             <article class="mini-stat storage-bank-stat">
               <span>Masuk ke Rekening</span>
               <strong id="incomeBankApproved">Rp0</strong>
+              <small>APPROVED bulan ini</small>
+            </article>
+            <article class="mini-stat storage-deposit-stat">
+              <span>Masuk ke Deposito</span>
+              <strong id="incomeDepositApproved">Rp0</strong>
               <small>APPROVED bulan ini</small>
             </article>
             <article class="mini-stat">
@@ -295,9 +309,10 @@
                   <label class="form-field">
                     <span>Penyimpanan Dana</span>
                     <select id="incomeStorageType" required>
-                      <option value="">Pilih Cash / Rekening</option>
+                      <option value="">Pilih jenis penyimpanan</option>
                       <option value="CASH">Cash / Tunai</option>
                       <option value="BANK">Rekening Bank</option>
+                      <option value="DEPOSIT">Deposito</option>
                     </select>
                   </label>
 
@@ -306,7 +321,7 @@
                     <select id="incomeDestinationAccount" required disabled>
                       <option value="">Pilih jenis penyimpanan terlebih dahulu</option>
                     </select>
-                    <small id="incomeStorageHelp">Cash dan rekening tetap dijumlahkan sebagai satu saldo Buku Besar.</small>
+                    <small id="incomeStorageHelp">Cash, rekening, dan deposito tetap dijumlahkan sebagai satu saldo Buku Besar.</small>
                   </label>
 
                   <label class="form-field full">
@@ -359,6 +374,7 @@
                   <option value="ALL">Semua Penyimpanan</option>
                   <option value="CASH">Cash / Tunai</option>
                   <option value="BANK">Rekening Bank</option>
+                  <option value="DEPOSIT">Deposito</option>
                 </select>
               </div>
 
@@ -446,7 +462,7 @@
                   <label class="form-field">
                     <span>Akun Sumber</span>
                     <select id="expenseSourceAccount" required disabled>
-                      <option value="">Pilih kas/bank sumber</option>
+                      <option value="">Pilih akun sumber</option>
                     </select>
                   </label>
 
@@ -597,7 +613,7 @@
                     <label class="form-field">
                       <span>Akun Sumber</span>
                       <select id="transferSourceAccount" required disabled>
-                        <option value="">Pilih kas/bank sumber</option>
+                        <option value="">Pilih akun sumber</option>
                       </select>
                     </label>
 
@@ -619,7 +635,7 @@
                     <label class="form-field">
                       <span>Akun Tujuan</span>
                       <select id="transferDestinationAccount" required disabled>
-                        <option value="">Pilih kas/bank tujuan</option>
+                        <option value="">Pilih akun tujuan</option>
                       </select>
                     </label>
                   </div>
@@ -1490,6 +1506,188 @@
           </div>
         </div>
 
+
+
+        <div id="depositSection" class="module-section hidden">
+          <div class="module-hero">
+            <div>
+              <span class="module-kicker">PENEMPATAN DANA BERJANGKA</span>
+              <h1>Deposito</h1>
+              <p>Kelola akun deposito, jatuh tempo, bunga, saldo aktual, dan riwayat penempatan/pencairan dana.</p>
+            </div>
+            <div class="module-actions">
+              <button id="refreshDepositBtn" class="secondary-btn report-top-btn" type="button">↻ Refresh</button>
+              <button id="newDepositBtn" class="brand-btn" type="button">+ Tambah Deposito</button>
+            </div>
+          </div>
+
+          <div class="module-stats deposit-stats">
+            <article class="mini-stat storage-deposit-stat">
+              <span>Total Saldo Deposito</span>
+              <strong id="depositTotalBalance">Rp0</strong>
+              <small>Saldo aktual seluruh deposito yang dapat diakses</small>
+            </article>
+            <article class="mini-stat">
+              <span>Deposito Aktif</span>
+              <strong id="depositActiveCount">0</strong>
+              <small>Belum ditutup</small>
+            </article>
+            <article class="mini-stat">
+              <span>Jatuh Tempo ≤ 30 Hari</span>
+              <strong id="depositDueSoonCount">0</strong>
+              <small>Perlu dipantau</small>
+            </article>
+            <article class="mini-stat">
+              <span>Estimasi Bunga / Tahun</span>
+              <strong id="depositAnnualInterest">Rp0</strong>
+              <small>Pokok × suku bunga</small>
+            </article>
+          </div>
+
+          <div class="deposit-layout">
+            <article id="depositFormCard" class="panel form-panel">
+              <div class="panel-title">
+                <h3 id="depositFormTitle">Tambah Akun Deposito</h3>
+                <p>Data pokok deposito. Penempatan dana dilakukan melalui Transfer Internal agar tidak dihitung sebagai pengeluaran.</p>
+              </div>
+
+              <form id="depositForm" class="finance-form">
+                <div class="form-grid">
+                  <label class="form-field">
+                    <span>Lembaga Pemilik</span>
+                    <select id="depositInstitution" required>
+                      <option value="">Pilih lembaga</option>
+                    </select>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Nama Akun Deposito</span>
+                    <input id="depositAccountName" type="text" placeholder="Contoh: Deposito BSI 12 Bulan" required>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Bank</span>
+                    <input id="depositBankName" type="text" placeholder="Contoh: Bank Syariah Indonesia" required>
+                  </label>
+
+                  <label class="form-field">
+                    <span>No. Deposito / Bilyet</span>
+                    <input id="depositNumber" type="text" placeholder="Opsional">
+                  </label>
+
+                  <label class="form-field">
+                    <span>Tanggal Penempatan</span>
+                    <input id="depositPlacementDate" type="date" required>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Tanggal Jatuh Tempo</span>
+                    <input id="depositMaturityDate" type="date" required>
+                  </label>
+
+                  <label class="form-field">
+                    <span>Tenor (bulan)</span>
+                    <input id="depositTenorMonths" type="number" min="1" step="1" placeholder="Contoh: 12">
+                  </label>
+
+                  <label class="form-field">
+                    <span>Suku Bunga (% / tahun)</span>
+                    <input id="depositInterestRate" type="number" min="0" step="0.01" placeholder="Contoh: 5.25">
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Pokok Deposito</span>
+                    <div class="money-input">
+                      <b>Rp</b>
+                      <input id="depositPrincipalAmount" type="number" min="0" step="1" placeholder="Contoh: 50000000" required>
+                    </div>
+                    <small id="depositPrincipalPreview">Rp0</small>
+                  </label>
+
+                  <label class="form-field full">
+                    <span>Keterangan</span>
+                    <textarea id="depositNotes" rows="3" placeholder="Contoh: ARO pokok, bunga masuk rekening operasional"></textarea>
+                  </label>
+                </div>
+
+                <div class="form-note">
+                  <strong>Alur yang benar:</strong> buat akun deposito → buka menu <b>Transfer Internal</b> → pindahkan dana dari rekening bank ke akun deposito. Saat dicairkan, transfer kembali dari deposito ke rekening. Bunga deposito dicatat sebagai <b>Pemasukan → Bunga Deposito</b>.
+                </div>
+
+                <div class="form-actions">
+                  <button id="cancelDepositEditBtn" class="outline-btn correction-cancel hidden" type="button">Batal Edit</button>
+                  <button id="saveDepositBtn" class="brand-btn" type="submit">Simpan Deposito</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel income-list-panel">
+              <div class="panel-title row-title">
+                <div>
+                  <h3>Daftar Deposito</h3>
+                  <p>Saldo aktual, pokok, bunga, dan jatuh tempo.</p>
+                </div>
+              </div>
+
+              <div class="income-filters deposit-filters">
+                <input id="depositSearch" type="search" placeholder="Cari bank, akun, nomor deposito...">
+                <select id="depositStatusFilter">
+                  <option value="ALL">Semua Status</option>
+                  <option value="ACTIVE">Aktif</option>
+                  <option value="MATURED">Jatuh Tempo</option>
+                  <option value="CLOSED">Ditutup</option>
+                </select>
+              </div>
+
+              <div class="table-wrap">
+                <table class="deposit-table">
+                  <thead>
+                    <tr>
+                      <th>Lembaga</th>
+                      <th>Akun / Bank</th>
+                      <th>Pokok</th>
+                      <th>Saldo Aktual</th>
+                      <th>Bunga</th>
+                      <th>Jatuh Tempo</th>
+                      <th>Status</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="depositTableBody">
+                    <tr><td colspan="8" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+
+          <article class="panel deposit-movement-panel">
+            <div class="panel-title row-title">
+              <div>
+                <h3>Riwayat Penempatan & Pencairan</h3>
+                <p>Transfer yang masuk atau keluar dari akun deposito.</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="deposit-movement-table">
+                <thead>
+                  <tr>
+                    <th>Tanggal</th>
+                    <th>No. Transaksi</th>
+                    <th>Deposito</th>
+                    <th>Jenis</th>
+                    <th>Lawan Akun</th>
+                    <th>Nominal</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="depositMovementBody">
+                  <tr><td colspan="7" class="empty">Memuat...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
 
         <div id="evidenceSection" class="module-section hidden">
           <div class="module-hero">
