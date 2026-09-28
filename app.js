@@ -2890,6 +2890,73 @@ function exportReportCsv(){
   toast("Laporan CSV berhasil dibuat.");
 }
 
+
+function exportCategoryRecapCsv(){
+  const summary=getReportCategorySummary();
+  if(!summary.length){
+    toast("Belum ada pengeluaran APPROVED untuk direkap.");
+    return;
+  }
+
+  const selectedName=reportSelectedCategoryName();
+  const expenseRows=getFilteredReportRows()
+    .filter(r=>r.status==="APPROVED" && r.transaction_type==="EXPENSE");
+
+  const summaryHeader=[
+    "Peringkat","Kategori","Jumlah Transaksi","Total Pengeluaran",
+    "Persentase","Transaksi Terbesar","No Transaksi Terbesar","Keterangan Transaksi Terbesar"
+  ];
+  const summaryBody=summary.map((r,i)=>[
+    i+1,r.name,r.count,r.total,Number(r.percentage.toFixed(2)),
+    r.maxAmount,r.maxTransactionNumber,r.maxDescription
+  ]);
+
+  const detailHeader=["Tanggal","No Transaksi","Lembaga","Kategori","Keterangan","Nominal"];
+  const detailBody=expenseRows.map(r=>[
+    r.transaction_date,
+    r.transaction_number||"",
+    r.institutions?.name||r._sourceInstitutionName||"",
+    r.expense_categories?.name||"Tanpa Kategori",
+    r.description||"",
+    Number(r.amount||0)
+  ]);
+
+  const institutionName=$("reportInstitution").value==="ALL"
+    ? "Semua Lembaga"
+    : reportInstitutions.find(i=>i.id===$("reportInstitution").value)?.name||"Lembaga";
+
+  const output=[
+    ["REKAP PENGELUARAN PER KATEGORI"],
+    ["Periode",`${$("reportDateFrom").value} s.d. ${$("reportDateTo").value}`],
+    ["Lembaga",institutionName],
+    ["Kategori",selectedName],
+    ["Status","APPROVED"],
+    [],
+    summaryHeader,
+    ...summaryBody,
+    [],
+    ["DETAIL TRANSAKSI PENGELUARAN APPROVED"],
+    detailHeader,
+    ...detailBody
+  ];
+
+  const safe=selectedName.replace(/[^\w\-]+/g,"_");
+  const csv="\uFEFF"+output.map(row=>row.map(csvCell).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`Rekap_Kategori_${safe}_${$("reportDateFrom").value}_${$("reportDateTo").value}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  toast(selectedName==="Semua Kategori"
+    ? "Rekap semua kategori berhasil didownload."
+    : `Rekap ${selectedName} berhasil didownload.`);
+}
+
 function printReport(){
   const rows=getFilteredReportRows();
   if(!rows.length){toast("Tidak ada data untuk dicetak.");return}
@@ -6225,9 +6292,19 @@ $("applyReportFilterBtn").addEventListener("click",async()=>{
   }
 });
 $("reportInstitution").addEventListener("change",renderReportRows);
-$("reportType").addEventListener("change",renderReportRows);
+$("reportType").addEventListener("change",()=>{
+  if(!["ALL","EXPENSE"].includes($("reportType").value) && $("reportCategory").value!=="ALL"){
+    $("reportCategory").value="ALL";
+  }
+  renderReportRows();
+});
+$("reportCategory").addEventListener("change",()=>{
+  if($("reportCategory").value!=="ALL") $("reportType").value="EXPENSE";
+  renderReportRows();
+});
 $("reportStatus").addEventListener("change",renderReportRows);
 $("exportReportCsvBtn").addEventListener("click",exportReportCsv);
+$("exportCategoryRecapBtn").addEventListener("click",exportCategoryRecapCsv);
 $("printReportBtn").addEventListener("click",printReport);
 
 /* LPJ events */
