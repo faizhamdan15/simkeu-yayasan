@@ -508,11 +508,11 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
 .report-top-btn{width:auto;margin:0;padding:0 14px}
 .report-filter-panel{margin-bottom:14px}
 .report-filter-grid{
-  display:grid;grid-template-columns:repeat(5,minmax(120px,1fr)) auto;
+  display:grid;grid-template-columns:repeat(6,minmax(115px,1fr)) auto;
   gap:10px;align-items:end
 }
 .filter-btn{height:43px;margin:0;white-space:nowrap}
-.report-stats{grid-template-columns:repeat(4,1fr)}
+.report-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
 .report-table{min-width:1080px}
 .report-description{
   display:block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
@@ -1744,4 +1744,87 @@ td{padding:11px 8px;border-bottom:1px solid #F2EFEA;white-space:nowrap}
 }
 @media(max-width:520px){
   .deposit-stats{grid-template-columns:1fr}
+}
+
+
+/* Rekap Pengeluaran per Kategori v7.4 */
+.report-category-panel{margin-bottom:14px}
+.report-category-table{min-width:940px}
+.report-top-category-stat strong{
+  font-size:12px;
+  line-height:1.25;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.report-category-highlight{
+  margin:0 0 12px;
+  padding:10px 12px;
+  border:1px solid #F0D2A8;
+  border-radius:11px;
+  background:#FFF8EF;
+  color:#6F563D;
+  font-size:9.5px;
+  line-height:1.5;
+}
+.report-category-highlight strong{color:#8E4B19}
+.report-rank{
+  display:inline-grid;
+  place-items:center;
+  min-width:24px;height:24px;
+  border-radius:999px;
+  background:#FFF1DE;
+  color:#9A521B;
+  font-size:8px;
+  font-weight:950;
+}
+.category-share-cell{
+  display:grid;
+  grid-template-columns:42px minmax(85px,1fr);
+  align-items:center;
+  gap:7px;
+  min-width:145px;
+}
+.category-share-cell strong{
+  font-size:8.5px;
+  text-align:right;
+}
+.category-share-track{
+  display:block;
+  height:7px;
+  background:#F0ECE7;
+  border-radius:999px;
+  overflow:hidden;
+}
+.category-share-track i{
+  display:block;
+  height:100%;
+  border-radius:999px;
+  background:#F89921;
+}
+.category-max-cell{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  max-width:250px;
+}
+.category-max-cell strong{font-size:8.5px}
+.category-max-cell span{
+  font-size:7.4px;
+  color:#877C72;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+@media(max-width:1320px){
+  .report-filter-grid{grid-template-columns:repeat(3,1fr)}
+  .report-stats{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:760px){
+  .report-stats{grid-template-columns:1fr 1fr}
+  .report-category-panel .panel-title.row-title{align-items:flex-start}
+  .report-category-panel .report-top-btn{width:100%}
+}
+@media(max-width:520px){
+  .report-stats{grid-template-columns:1fr}
 }
