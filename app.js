@@ -2741,6 +2741,88 @@ function reportSourceCategory(row){
   return `${row._sourceInstitutionName} → ${row._destinationInstitutionName}`;
 }
 
+
+function reportSelectedCategoryName(){
+  const id=$("reportCategory").value||"ALL";
+  if(id==="ALL") return "Semua Kategori";
+  return reportCategories.find(c=>c.id===id)?.name||"Kategori";
+}
+
+function getReportCategorySummary(){
+  const expenseRows=getFilteredReportRows()
+    .filter(r=>r.status==="APPROVED" && r.transaction_type==="EXPENSE");
+
+  const totalExpense=expenseRows.reduce((s,r)=>s+Number(r.amount||0),0);
+  const map=new Map();
+
+  expenseRows.forEach(r=>{
+    const key=r.expense_category_id||"UNCATEGORIZED";
+    const name=r.expense_categories?.name||"Tanpa Kategori";
+    if(!map.has(key)){
+      map.set(key,{
+        id:key,name,count:0,total:0,
+        maxAmount:0,maxTransactionNumber:"-",maxDescription:"-"
+      });
+    }
+    const item=map.get(key);
+    const amount=Number(r.amount||0);
+    item.count+=1;
+    item.total+=amount;
+    if(amount>item.maxAmount){
+      item.maxAmount=amount;
+      item.maxTransactionNumber=r.transaction_number||"-";
+      item.maxDescription=r.description||"-";
+    }
+  });
+
+  return [...map.values()]
+    .map(item=>({...item,percentage:totalExpense>0?item.total/totalExpense*100:0}))
+    .sort((a,b)=>b.total-a.total || a.name.localeCompare(b.name,"id"));
+}
+
+function renderReportCategorySummary(){
+  const summary=getReportCategorySummary();
+  const total=summary.reduce((s,r)=>s+r.total,0);
+  const top=summary[0]||null;
+
+  $("reportTopCategoryName").textContent=top?.name||"—";
+  $("reportTopCategoryAmount").textContent=top
+    ? `${rupiah(top.total)} • ${top.count} transaksi`
+    : "Belum ada pengeluaran Approved";
+
+  if(top){
+    $("reportCategoryHighlight").innerHTML=
+      `Pengeluaran terbesar: <strong>${escapeHtml(top.name)}</strong> sebesar <strong>${rupiah(top.total)}</strong>. `+
+      `Transaksi terbesar kategori ini <strong>${rupiah(top.maxAmount)}</strong> (${escapeHtml(top.maxTransactionNumber)}).`;
+  }else{
+    $("reportCategoryHighlight").textContent="Belum ada transaksi pengeluaran APPROVED sesuai filter.";
+  }
+
+  $("reportCategoryInfo").textContent=
+    `${reportSelectedCategoryName()} • ${summary.length} kategori • Total ${rupiah(total)} • transaksi APPROVED`;
+
+  $("reportCategorySummaryBody").innerHTML=summary.length?summary.map((r,i)=>`
+    <tr>
+      <td><span class="report-rank">${i+1}</span></td>
+      <td><strong>${escapeHtml(r.name)}</strong></td>
+      <td>${r.count} transaksi</td>
+      <td><strong class="report-amount-expense">${rupiah(r.total)}</strong></td>
+      <td>
+        <div class="category-share-cell">
+          <strong>${r.percentage.toLocaleString("id-ID",{maximumFractionDigits:1})}%</strong>
+          <span class="category-share-track"><i style="width:${Math.min(100,r.percentage)}%"></i></span>
+        </div>
+      </td>
+      <td>
+        <div class="category-max-cell">
+          <strong>${rupiah(r.maxAmount)}</strong>
+          <span>${escapeHtml(r.maxTransactionNumber)} • ${escapeHtml(r.maxDescription)}</span>
+        </div>
+      </td>
+    </tr>`).join("")
+    : `<tr><td colspan="6" class="empty">Belum ada pengeluaran APPROVED sesuai filter.</td></tr>`;
+}
+
 function renderReportRows(){
   const rows=getFilteredReportRows();
   const approved=rows.filter(r=>r.status==="APPROVED");
@@ -2770,6 +2852,8 @@ function renderReportRows(){
         <td><span class="pill ${statusClass(r.status)}">${escapeHtml(r.status)}</span></td>
       </tr>`;
   }).join(""):`<tr><td colspan="8" class="empty">Tidak ada transaksi sesuai filter.</td></tr>`;
+
+  renderReportCategorySummary();
 }
 
 function csvCell(value){
