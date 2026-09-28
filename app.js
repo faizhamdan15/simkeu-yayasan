@@ -2715,6 +2715,7 @@ function getFilteredReportRows(){
   const institution=$("reportInstitution").value;
   const type=$("reportType").value;
   const status=$("reportStatus").value;
+  const category=$("reportCategory").value||"ALL";
 
   return reportRowsCache.filter(r=>{
     const institutionMatch=
@@ -2723,9 +2724,14 @@ function getFilteredReportRows(){
       r.source_account?.institution_id===institution ||
       r.destination_account?.institution_id===institution;
 
+    const categoryMatch=
+      category==="ALL" ||
+      (r.transaction_type==="EXPENSE" && r.expense_category_id===category);
+
     return institutionMatch &&
       (type==="ALL" || r.transaction_type===type) &&
-      (status==="ALL" || r.status===status);
+      (status==="ALL" || r.status===status) &&
+      categoryMatch;
   });
 }
 
