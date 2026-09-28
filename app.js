@@ -453,7 +453,7 @@ function refreshIncomeAccountOptions(){
 
   let placeholder="Pilih lembaga dan jenis penyimpanan";
   if(institutionId && !storageType) placeholder="Pilih jenis penyimpanan terlebih dahulu";
-  if(institutionId && storageType && !rows.length) placeholder=\`Belum ada akun \${typeName} untuk lembaga ini\`;
+  if(institutionId && storageType && !rows.length) placeholder=`Belum ada akun ${typeName} untuk lembaga ini`;
   if(rows.length){
     placeholder=storageType==="CASH" ? "Pilih Kas Tunai"
       : storageType==="BANK" ? "Pilih Rekening Bank"
@@ -461,11 +461,11 @@ function refreshIncomeAccountOptions(){
       : "Pilih Akun";
   }
 
-  accountSelect.innerHTML=\`<option value="">\${placeholder}</option>\`+
+  accountSelect.innerHTML=`<option value="">${placeholder}</option>`+
     rows.map(a=>{
       const bankInfo=["BANK","DEPOSIT"].includes(a.account_type) && a.bank_name && a.bank_name!=="Belum Diisi"
-        ? \` — \${escapeHtml(a.bank_name)}\` : "";
-      return \`<option value="\${a.id}">\${escapeHtml(a.account_name)}\${bankInfo}</option>\`;
+        ? ` — ${escapeHtml(a.bank_name)}` : "";
+      return `<option value="${a.id}">${escapeHtml(a.account_name)}${bankInfo}</option>`;
     }).join("");
 
   accountSelect.disabled=!institutionId || !storageType || !rows.length;
@@ -1919,25 +1919,25 @@ function depositBalanceFor(accountId){
 
 async function loadDepositModule(){
   try{
-    $("depositTableBody").innerHTML=\`<tr><td colspan="8" class="empty">Memuat deposito...</td></tr>\`;
-    $("depositMovementBody").innerHTML=\`<tr><td colspan="7" class="empty">Memuat mutasi...</td></tr>\`;
+    $("depositTableBody").innerHTML=`<tr><td colspan="8" class="empty">Memuat deposito...</td></tr>`;
+    $("depositMovementBody").innerHTML=`<tr><td colspan="7" class="empty">Memuat mutasi...</td></tr>`;
 
     const [instRes,depRes,balanceRes,transferRes]=await Promise.all([
       sb.from("institutions").select("id,code,name,institution_type").eq("is_active",true).order("name"),
-      sb.from("deposit_accounts").select(\`
+      sb.from("deposit_accounts").select(`
         id,account_id,institution_id,bank_name,deposit_number,placement_date,maturity_date,
         tenor_months,interest_rate,principal_amount,status,notes,created_at,updated_at,
         institutions:institution_id(name),
         accounts:account_id(account_name,account_type,bank_name,account_number,is_active)
-      \`).order("maturity_date",{ascending:true}),
+      `).order("maturity_date",{ascending:true}),
       sb.from("v_account_balances")
         .select("account_id,institution_id,institution_name,account_name,account_type,current_balance"),
-      sb.from("transactions").select(\`
+      sb.from("transactions").select(`
         id,transaction_number,transaction_date,transaction_type,amount,status,created_at,
         source_account_id,destination_account_id,
         source_account:source_account_id(id,account_name,institution_id,account_type),
         destination_account:destination_account_id(id,account_name,institution_id,account_type)
-      \`).eq("transaction_type","TRANSFER")
+      `).eq("transaction_type","TRANSFER")
         .order("transaction_date",{ascending:false})
         .order("created_at",{ascending:false})
         .limit(500)
@@ -1964,8 +1964,8 @@ async function loadDepositModule(){
     if(!$("depositPlacementDate").value) $("depositPlacementDate").value=todayISO();
   }catch(err){
     console.error(err);
-    $("depositTableBody").innerHTML=\`<tr><td colspan="8" class="empty">Gagal memuat deposito.</td></tr>\`;
-    $("depositMovementBody").innerHTML=\`<tr><td colspan="7" class="empty">Gagal memuat mutasi deposito.</td></tr>\`;
+    $("depositTableBody").innerHTML=`<tr><td colspan="8" class="empty">Gagal memuat deposito.</td></tr>`;
+    $("depositMovementBody").innerHTML=`<tr><td colspan="7" class="empty">Gagal memuat mutasi deposito.</td></tr>`;
     toast("Gagal memuat Deposito: "+(err.message||"error"));
   }
 }
@@ -1973,8 +1973,8 @@ async function loadDepositModule(){
 function fillDepositInstitutionOptions(){
   const select=$("depositInstitution");
   const previous=select.value;
-  select.innerHTML=\`<option value="">Pilih lembaga</option>\`+
-    depositInstitutions.map(i=>\`<option value="\${i.id}">\${escapeHtml(i.name)}</option>\`).join("");
+  select.innerHTML=`<option value="">Pilih lembaga</option>`+
+    depositInstitutions.map(i=>`<option value="${i.id}">${escapeHtml(i.name)}</option>`).join("");
   if(previous && depositInstitutions.some(i=>i.id===previous)) select.value=previous;
   else if(currentProfile?.institution_id && depositInstitutions.some(i=>i.id===currentProfile.institution_id)){
     select.value=currentProfile.institution_id;
@@ -2012,31 +2012,31 @@ function renderDepositRows(){
     const effective=depositEffectiveStatus(d);
     const days=depositDaysUntil(d.maturity_date);
     const dueText=effective==="CLOSED" ? "Sudah ditutup"
-      : days<0 ? \`\${Math.abs(days)} hari lewat jatuh tempo\`
+      : days<0 ? `${Math.abs(days)} hari lewat jatuh tempo`
       : days===0 ? "Jatuh tempo hari ini"
-      : \`\${days} hari lagi\`;
+      : `${days} hari lagi`;
     const balance=depositBalanceFor(d.account_id);
     const actions=[];
     if(isCentralUser() && d.status!=="CLOSED"){
-      actions.push(\`<button class="table-action edit" data-deposit-action="edit" data-id="\${d.id}">Edit</button>\`);
-      actions.push(\`<button class="table-action" data-deposit-action="transfer" data-id="\${d.id}">Transfer</button>\`);
-      actions.push(\`<button class="table-action void-action" data-deposit-action="close" data-id="\${d.id}">Tutup</button>\`);
+      actions.push(`<button class="table-action edit" data-deposit-action="edit" data-id="${d.id}">Edit</button>`);
+      actions.push(`<button class="table-action" data-deposit-action="transfer" data-id="${d.id}">Transfer</button>`);
+      actions.push(`<button class="table-action void-action" data-deposit-action="close" data-id="${d.id}">Tutup</button>`);
     }
 
-    return \`<tr>
-      <td>\${escapeHtml(d.institutions?.name||"-")}</td>
+    return `<tr>
+      <td>${escapeHtml(d.institutions?.name||"-")}</td>
       <td><div class="deposit-account-cell">
-        <strong>\${escapeHtml(d.accounts?.account_name||"-")}</strong>
-        <span>\${escapeHtml(d.bank_name||"-")}\${d.deposit_number?" • "+escapeHtml(d.deposit_number):""}</span>
+        <strong>${escapeHtml(d.accounts?.account_name||"-")}</strong>
+        <span>${escapeHtml(d.bank_name||"-")}${d.deposit_number?" • "+escapeHtml(d.deposit_number):""}</span>
       </div></td>
-      <td><strong>\${rupiah(d.principal_amount)}</strong></td>
-      <td><strong class="deposit-current-balance">\${rupiah(balance)}</strong></td>
-      <td>\${Number(d.interest_rate||0).toLocaleString("id-ID",{maximumFractionDigits:4})}% / tahun</td>
-      <td><div class="deposit-date-cell"><strong>\${formatDate(d.maturity_date)}</strong><span>\${escapeHtml(dueText)}</span></div></td>
-      <td><span class="deposit-status \${effective.toLowerCase()}">\${depositStatusLabel(effective)}</span></td>
-      <td><div class="asset-actions">\${actions.join("")||"—"}</div></td>
-    </tr>\`;
-  }).join(""):\`<tr><td colspan="8" class="empty">Belum ada deposito yang sesuai filter.</td></tr>\`;
+      <td><strong>${rupiah(d.principal_amount)}</strong></td>
+      <td><strong class="deposit-current-balance">${rupiah(balance)}</strong></td>
+      <td>${Number(d.interest_rate||0).toLocaleString("id-ID",{maximumFractionDigits:4})}% / tahun</td>
+      <td><div class="deposit-date-cell"><strong>${formatDate(d.maturity_date)}</strong><span>${escapeHtml(dueText)}</span></div></td>
+      <td><span class="deposit-status ${effective.toLowerCase()}">${depositStatusLabel(effective)}</span></td>
+      <td><div class="asset-actions">${actions.join("")||"—"}</div></td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="8" class="empty">Belum ada deposito yang sesuai filter.</td></tr>`;
 }
 
 function renderDepositMovements(){
@@ -2059,16 +2059,16 @@ function renderDepositMovements(){
       other=t.destination_account?.account_name||"-";
     }
 
-    return \`<tr>
-      <td>\${formatDate(t.transaction_date)}</td>
-      <td><strong>\${escapeHtml(t.transaction_number||"-")}</strong></td>
-      <td>\${escapeHtml(dep?.accounts?.account_name||"-")}</td>
-      <td><span class="deposit-movement-kind">\${escapeHtml(kind)}</span></td>
-      <td>\${escapeHtml(other)}</td>
-      <td><strong>\${rupiah(t.amount)}</strong></td>
-      <td><span class="pill \${statusClass(t.status)}">\${escapeHtml(t.status)}</span></td>
-    </tr>\`;
-  }).join(""):\`<tr><td colspan="7" class="empty">Belum ada penempatan atau pencairan deposito.</td></tr>\`;
+    return `<tr>
+      <td>${formatDate(t.transaction_date)}</td>
+      <td><strong>${escapeHtml(t.transaction_number||"-")}</strong></td>
+      <td>${escapeHtml(dep?.accounts?.account_name||"-")}</td>
+      <td><span class="deposit-movement-kind">${escapeHtml(kind)}</span></td>
+      <td>${escapeHtml(other)}</td>
+      <td><strong>${rupiah(t.amount)}</strong></td>
+      <td><span class="pill ${statusClass(t.status)}">${escapeHtml(t.status)}</span></td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="7" class="empty">Belum ada penempatan atau pencairan deposito.</td></tr>`;
 }
 
 function setDepositEditMode(active){
@@ -2158,7 +2158,7 @@ async function saveDeposit(){
       p_notes:notes||null
     });
     if(error) throw error;
-    toast(\`Akun deposito dibuat. Tempatkan dana melalui Transfer Internal\${principal_amount?" sebesar "+rupiah(principal_amount):""}.\`);
+    toast(`Akun deposito dibuat. Tempatkan dana melalui Transfer Internal${principal_amount?" sebesar "+rupiah(principal_amount):""}.`);
   }
 
   resetDepositForm();
@@ -2172,10 +2172,10 @@ async function closeDeposit(id){
 
   const balance=depositBalanceFor(row.account_id);
   if(Math.abs(balance)>0.005){
-    throw new Error(\`Saldo deposito masih \${rupiah(balance)}. Cairkan melalui Transfer Internal sampai saldo Rp0 terlebih dahulu.\`);
+    throw new Error(`Saldo deposito masih ${rupiah(balance)}. Cairkan melalui Transfer Internal sampai saldo Rp0 terlebih dahulu.`);
   }
 
-  if(!confirm(\`Tutup deposito "\${row.accounts?.account_name||"Deposito"}"? Data tetap tersimpan dalam histori.\`)) return;
+  if(!confirm(`Tutup deposito "${row.accounts?.account_name||"Deposito"}"? Data tetap tersimpan dalam histori.`)) return;
 
   const {error}=await sb.rpc("close_deposit_account",{p_deposit_id:id});
   if(error) throw error;
