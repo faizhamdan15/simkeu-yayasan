@@ -30,6 +30,12 @@ let transferRowsCache = [];
 let pendingTransferSaveAction = "draft";
 let editingTransferId = null;
 
+let depositInstitutions = [];
+let depositRowsCache = [];
+let depositBalances = [];
+let depositTransferRows = [];
+let editingDepositId = null;
+
 let reportInstitutions = [];
 let reportRowsCache = [];
 
@@ -110,11 +116,12 @@ function roleLabel(r){
 }
 function typeLabel(t){return {INCOME:"Pemasukan",EXPENSE:"Pengeluaran",TRANSFER:"Transfer"}[t]||t}
 function storageTypeLabel(type){
-  return {CASH:"Cash / Tunai",BANK:"Rekening Bank",E_WALLET:"E-Wallet",OTHER:"Lainnya"}[type]||"Lainnya";
+  return {CASH:"Cash / Tunai",BANK:"Rekening Bank",DEPOSIT:"Deposito",E_WALLET:"E-Wallet",OTHER:"Lainnya"}[type]||"Lainnya";
 }
 function storageTypeClass(type){
   if(type==="CASH") return "cash";
   if(type==="BANK") return "bank";
+  if(type==="DEPOSIT") return "deposit";
   return "other";
 }
 function typeClass(t){return {INCOME:"income",EXPENSE:"expense",TRANSFER:"transfer"}[t]||""}
@@ -291,10 +298,13 @@ async function loadDashboard(){
       .reduce((s,x)=>s+Number(x.current_balance||0),0);
     const bankTotal=b.filter(x=>accountTypeMap.get(x.account_id)==="BANK")
       .reduce((s,x)=>s+Number(x.current_balance||0),0);
+    const depositTotal=b.filter(x=>accountTypeMap.get(x.account_id)==="DEPOSIT")
+      .reduce((s,x)=>s+Number(x.current_balance||0),0);
 
     $("totalBalance").textContent=rupiah(total);
     $("totalCashBalance").textContent=rupiah(cashTotal);
     $("totalBankBalance").textContent=rupiah(bankTotal);
+    $("totalDepositBalance").textContent=rupiah(depositTotal);
     $("ledgerGrandBalance").textContent=rupiah(total);
     $("monthlyIncome").textContent=rupiah(m.filter(x=>x.transaction_type==="INCOME").reduce((s,x)=>s+Number(x.amount||0),0));
     $("monthlyExpense").textContent=rupiah(m.filter(x=>x.transaction_type==="EXPENSE").reduce((s,x)=>s+Number(x.amount||0),0));
@@ -313,7 +323,7 @@ function renderInstitutions(rows,accountTypeMap=new Map()){
   const map=new Map();
   rows.forEach(r=>{
     const n=r.institution_name||"Lembaga";
-    if(!map.has(n))map.set(n,{total:0,cash:0,bank:0,other:0,count:0});
+    if(!map.has(n))map.set(n,{total:0,cash:0,bank:0,deposit:0,other:0,count:0});
     const target=map.get(n);
     const amount=Number(r.current_balance||0);
     const type=accountTypeMap.get(r.account_id)||"OTHER";
@@ -321,6 +331,7 @@ function renderInstitutions(rows,accountTypeMap=new Map()){
     target.count++;
     if(type==="CASH")target.cash+=amount;
     else if(type==="BANK")target.bank+=amount;
+    else if(type==="DEPOSIT")target.deposit+=amount;
     else target.other+=amount;
   });
   $("institutionBalances").innerHTML=map.size?[...map.entries()].map(([n,v])=>`
@@ -329,11 +340,11 @@ function renderInstitutions(rows,accountTypeMap=new Map()){
         <div class="badge">${escapeHtml(n.slice(0,3).toUpperCase())}</div>
         <div>
           <strong>${escapeHtml(n)}</strong>
-          <span class="institution-balance-breakdown">Cash ${rupiah(v.cash)} • Rekening ${rupiah(v.bank)}</span>
+          <span class="institution-balance-breakdown">Cash ${rupiah(v.cash)} • Rekening ${rupiah(v.bank)} • Deposito ${rupiah(v.deposit)}</span>
         </div>
       </div>
       <div class="institution-amount">${rupiah(v.total)}</div>
-    </div>`).join(""):`<div class="empty">Belum ada akun kas/bank.</div>`;
+    </div>`).join(""):`<div class="empty">Belum ada akun keuangan.</div>`;
 }
 
 function renderRecent(rows){
@@ -437,33 +448,36 @@ function refreshIncomeAccountOptions(){
   const institutionId=$("incomeInstitution").value;
   const storageType=$("incomeStorageType").value;
   const accountSelect=$("incomeDestinationAccount");
-
   const rows=incomeAccounts.filter(a=>a.institution_id===institutionId && a.account_type===storageType);
+  const typeName=storageTypeLabel(storageType);
 
   let placeholder="Pilih lembaga dan jenis penyimpanan";
-  if(institutionId && !storageType) placeholder="Pilih Cash / Rekening terlebih dahulu";
-  if(institutionId && storageType && !rows.length){
-    placeholder=storageType==="CASH"
-      ? "Belum ada akun Cash untuk lembaga ini"
-      : "Belum ada rekening bank untuk lembaga ini";
+  if(institutionId && !storageType) placeholder="Pilih jenis penyimpanan terlebih dahulu";
+  if(institutionId && storageType && !rows.length) placeholder=\`Belum ada akun \${typeName} untuk lembaga ini\`;
+  if(rows.length){
+    placeholder=storageType==="CASH" ? "Pilih Kas Tunai"
+      : storageType==="BANK" ? "Pilih Rekening Bank"
+      : storageType==="DEPOSIT" ? "Pilih Akun Deposito"
+      : "Pilih Akun";
   }
-  if(rows.length) placeholder=storageType==="CASH" ? "Pilih Kas Tunai" : "Pilih Rekening Bank";
 
-  accountSelect.innerHTML=`<option value="">${placeholder}</option>`+
+  accountSelect.innerHTML=\`<option value="">\${placeholder}</option>\`+
     rows.map(a=>{
-      const bankInfo=a.account_type==="BANK" && a.bank_name && a.bank_name!=="Belum Diisi"
-        ? ` — ${escapeHtml(a.bank_name)}` : "";
-      return `<option value="${a.id}">${escapeHtml(a.account_name)}${bankInfo}</option>`;
+      const bankInfo=["BANK","DEPOSIT"].includes(a.account_type) && a.bank_name && a.bank_name!=="Belum Diisi"
+        ? \` — \${escapeHtml(a.bank_name)}\` : "";
+      return \`<option value="\${a.id}">\${escapeHtml(a.account_name)}\${bankInfo}</option>\`;
     }).join("");
 
   accountSelect.disabled=!institutionId || !storageType || !rows.length;
 
   if($("incomeStorageHelp")){
     $("incomeStorageHelp").textContent=storageType==="CASH"
-      ? "Uang akan tercatat sebagai kas tunai, tetapi tetap masuk ke Total Buku Besar."
+      ? "Uang tercatat sebagai kas tunai dan tetap masuk Total Buku Besar."
       : storageType==="BANK"
-        ? "Uang akan tercatat di rekening bank, tetapi tetap masuk ke Total Buku Besar."
-        : "Cash dan rekening tetap dijumlahkan sebagai satu saldo Buku Besar.";
+        ? "Uang tercatat di rekening bank dan tetap masuk Total Buku Besar."
+        : storageType==="DEPOSIT"
+          ? "Pemasukan langsung ke deposito tetap masuk Total Buku Besar. Penempatan pokok sebaiknya melalui Transfer Internal."
+          : "Cash, rekening, dan deposito dijumlahkan sebagai satu saldo Buku Besar.";
   }
 }
 
@@ -505,10 +519,13 @@ function updateIncomeModuleStats(){
     .reduce((s,x)=>s+Number(x.amount||0),0);
   const bankMonth=approvedRows.filter(x=>x.accounts?.account_type==="BANK")
     .reduce((s,x)=>s+Number(x.amount||0),0);
+  const depositMonth=approvedRows.filter(x=>x.accounts?.account_type==="DEPOSIT")
+    .reduce((s,x)=>s+Number(x.amount||0),0);
 
   $("incomeModuleApproved").textContent=rupiah(approvedMonth);
   $("incomeCashApproved").textContent=rupiah(cashMonth);
   $("incomeBankApproved").textContent=rupiah(bankMonth);
+  $("incomeDepositApproved").textContent=rupiah(depositMonth);
   $("incomeDraftCount").textContent=incomeRowsCache.filter(x=>x.status==="DRAFT").length;
   $("incomeSubmittedCount").textContent=incomeRowsCache.filter(x=>x.status==="SUBMITTED").length;
 }
@@ -634,7 +651,7 @@ async function saveIncome(action){
   const storage_type=$("incomeStorageType").value;
 
   if(!transaction_date||!institution_id||!fund_source_id||!storage_type||!destination_account_id||!amount||amount<=0){
-    throw new Error("Lengkapi tanggal, lembaga, sumber dana, penyimpanan Cash/Rekening, akun tujuan, dan nominal.");
+    throw new Error("Lengkapi tanggal, lembaga, sumber dana, jenis penyimpanan, akun tujuan, dan nominal.");
   }
 
   const selectedAccount=incomeAccounts.find(a=>a.id===destination_account_id);
@@ -642,7 +659,7 @@ async function saveIncome(action){
     throw new Error("Akun tujuan tidak sesuai dengan lembaga yang dipilih.");
   }
   if(selectedAccount.account_type!==storage_type){
-    throw new Error("Jenis penyimpanan tidak sesuai dengan akun tujuan. Pilih ulang Cash/Rekening.");
+    throw new Error("Jenis penyimpanan tidak sesuai dengan akun tujuan. Pilih ulang jenis penyimpanan.");
   }
 
   if(editingIncomeId){
@@ -771,7 +788,7 @@ function refreshExpenseAccountOptions(){
   const accountSelect=$("expenseSourceAccount");
   const rows=expenseAccounts.filter(a=>a.institution_id===institutionId);
 
-  accountSelect.innerHTML=`<option value="">Pilih kas/bank sumber</option>`+
+  accountSelect.innerHTML=`<option value="">Pilih akun sumber</option>`+
     rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
 
   accountSelect.disabled=!institutionId || !rows.length;
@@ -902,7 +919,7 @@ function resetExpenseForm(){
     refreshExpenseAccountOptions();
   }else{
     $("expenseInstitution").disabled=false;
-    $("expenseSourceAccount").innerHTML=`<option value="">Pilih kas/bank sumber</option>`;
+    $("expenseSourceAccount").innerHTML=`<option value="">Pilih akun sumber</option>`;
     $("expenseSourceAccount").disabled=true;
   }
 }
@@ -1168,8 +1185,8 @@ function fillTransferMasterOptions(){
   sourceInst.innerHTML=options;
   destInst.innerHTML=options;
 
-  $("transferSourceAccount").innerHTML=`<option value="">Pilih kas/bank sumber</option>`;
-  $("transferDestinationAccount").innerHTML=`<option value="">Pilih kas/bank tujuan</option>`;
+  $("transferSourceAccount").innerHTML=`<option value="">Pilih akun sumber</option>`;
+  $("transferDestinationAccount").innerHTML=`<option value="">Pilih akun tujuan</option>`;
   $("transferSourceAccount").disabled=true;
   $("transferDestinationAccount").disabled=true;
   updateTransferBalanceHint();
@@ -1180,7 +1197,7 @@ function refreshTransferSourceAccounts(){
   const accountSelect=$("transferSourceAccount");
   const rows=transferAccounts.filter(a=>a.institution_id===institutionId);
 
-  accountSelect.innerHTML=`<option value="">Pilih kas/bank sumber</option>`+
+  accountSelect.innerHTML=`<option value="">Pilih akun sumber</option>`+
     rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
 
   accountSelect.disabled=!isCentralUser() || !institutionId || !rows.length;
@@ -1194,7 +1211,7 @@ function refreshTransferDestinationAccounts(){
   const sourceId=$("transferSourceAccount").value;
   const rows=transferAccounts.filter(a=>a.institution_id===institutionId && a.id!==sourceId);
 
-  accountSelect.innerHTML=`<option value="">Pilih kas/bank tujuan</option>`+
+  accountSelect.innerHTML=`<option value="">Pilih akun tujuan</option>`+
     rows.map(a=>`<option value="${a.id}">${escapeHtml(a.account_name)}${a.bank_name&&a.bank_name!=="Belum Diisi" ? " — "+escapeHtml(a.bank_name) : ""}</option>`).join("");
 
   accountSelect.disabled=!isCentralUser() || !institutionId || !rows.length;
@@ -1874,6 +1891,297 @@ function exportAssetsCsv(){
   const csv="\uFEFF"+[h,...b].map(r=>r.map(csvCell).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}),u=URL.createObjectURL(blob),x=document.createElement("a");x.href=u;x.download=`Inventaris_SIMKEU_${todayISO()}.csv`;x.click();URL.revokeObjectURL(u);
 }
 
+
+
+/* =========================================================
+   DEPOSITO & PENEMPATAN DANA v7.3
+   ========================================================= */
+
+function depositEffectiveStatus(row){
+  if(row.status==="CLOSED") return "CLOSED";
+  return row.maturity_date && row.maturity_date<=todayISO() ? "MATURED" : "ACTIVE";
+}
+
+function depositStatusLabel(status){
+  return {ACTIVE:"Aktif",MATURED:"Jatuh Tempo",CLOSED:"Ditutup"}[status]||status||"-";
+}
+
+function depositDaysUntil(value){
+  if(!value) return null;
+  const a=new Date(todayISO()+"T00:00:00");
+  const b=new Date(value+"T00:00:00");
+  return Math.ceil((b-a)/86400000);
+}
+
+function depositBalanceFor(accountId){
+  return Number(depositBalances.find(x=>x.account_id===accountId)?.current_balance||0);
+}
+
+async function loadDepositModule(){
+  try{
+    $("depositTableBody").innerHTML=\`<tr><td colspan="8" class="empty">Memuat deposito...</td></tr>\`;
+    $("depositMovementBody").innerHTML=\`<tr><td colspan="7" class="empty">Memuat mutasi...</td></tr>\`;
+
+    const [instRes,depRes,balanceRes,transferRes]=await Promise.all([
+      sb.from("institutions").select("id,code,name,institution_type").eq("is_active",true).order("name"),
+      sb.from("deposit_accounts").select(\`
+        id,account_id,institution_id,bank_name,deposit_number,placement_date,maturity_date,
+        tenor_months,interest_rate,principal_amount,status,notes,created_at,updated_at,
+        institutions:institution_id(name),
+        accounts:account_id(account_name,account_type,bank_name,account_number,is_active)
+      \`).order("maturity_date",{ascending:true}),
+      sb.from("v_account_balances")
+        .select("account_id,institution_id,institution_name,account_name,account_type,current_balance"),
+      sb.from("transactions").select(\`
+        id,transaction_number,transaction_date,transaction_type,amount,status,created_at,
+        source_account_id,destination_account_id,
+        source_account:source_account_id(id,account_name,institution_id,account_type),
+        destination_account:destination_account_id(id,account_name,institution_id,account_type)
+      \`).eq("transaction_type","TRANSFER")
+        .order("transaction_date",{ascending:false})
+        .order("created_at",{ascending:false})
+        .limit(500)
+    ]);
+    [instRes,depRes,balanceRes,transferRes].forEach(r=>{if(r.error)throw r.error});
+
+    depositInstitutions=instRes.data||[];
+    depositRowsCache=depRes.data||[];
+    depositBalances=balanceRes.data||[];
+
+    const accountIds=new Set(depositRowsCache.map(d=>d.account_id));
+    depositTransferRows=(transferRes.data||[]).filter(t=>
+      accountIds.has(t.source_account_id)||accountIds.has(t.destination_account_id)
+    );
+
+    fillDepositInstitutionOptions();
+    renderDepositSummary();
+    renderDepositRows();
+    renderDepositMovements();
+
+    const canManage=isCentralUser();
+    $("newDepositBtn").style.display=canManage?"":"none";
+    $("depositFormCard").classList.toggle("hidden",!canManage);
+    if(!$("depositPlacementDate").value) $("depositPlacementDate").value=todayISO();
+  }catch(err){
+    console.error(err);
+    $("depositTableBody").innerHTML=\`<tr><td colspan="8" class="empty">Gagal memuat deposito.</td></tr>\`;
+    $("depositMovementBody").innerHTML=\`<tr><td colspan="7" class="empty">Gagal memuat mutasi deposito.</td></tr>\`;
+    toast("Gagal memuat Deposito: "+(err.message||"error"));
+  }
+}
+
+function fillDepositInstitutionOptions(){
+  const select=$("depositInstitution");
+  const previous=select.value;
+  select.innerHTML=\`<option value="">Pilih lembaga</option>\`+
+    depositInstitutions.map(i=>\`<option value="\${i.id}">\${escapeHtml(i.name)}</option>\`).join("");
+  if(previous && depositInstitutions.some(i=>i.id===previous)) select.value=previous;
+  else if(currentProfile?.institution_id && depositInstitutions.some(i=>i.id===currentProfile.institution_id)){
+    select.value=currentProfile.institution_id;
+  }
+}
+
+function renderDepositSummary(){
+  const active=depositRowsCache.filter(d=>d.status==="ACTIVE");
+  const total=depositRowsCache.reduce((s,d)=>s+depositBalanceFor(d.account_id),0);
+  const dueSoon=active.filter(d=>{
+    const days=depositDaysUntil(d.maturity_date);
+    return days!==null && days>=0 && days<=30;
+  }).length;
+  const annualInterest=active.reduce((s,d)=>
+    s+(Number(d.principal_amount||0)*Number(d.interest_rate||0)/100),0
+  );
+
+  $("depositTotalBalance").textContent=rupiah(total);
+  $("depositActiveCount").textContent=active.length;
+  $("depositDueSoonCount").textContent=dueSoon;
+  $("depositAnnualInterest").textContent=rupiah(annualInterest);
+}
+
+function renderDepositRows(){
+  const term=($("depositSearch").value||"").trim().toLowerCase();
+  const filter=$("depositStatusFilter").value||"ALL";
+  const rows=depositRowsCache.filter(d=>{
+    const effective=depositEffectiveStatus(d);
+    const hay=[d.institutions?.name,d.accounts?.account_name,d.bank_name,d.deposit_number,d.notes]
+      .filter(Boolean).join(" ").toLowerCase();
+    return (!term||hay.includes(term)) && (filter==="ALL"||effective===filter);
+  });
+
+  $("depositTableBody").innerHTML=rows.length?rows.map(d=>{
+    const effective=depositEffectiveStatus(d);
+    const days=depositDaysUntil(d.maturity_date);
+    const dueText=effective==="CLOSED" ? "Sudah ditutup"
+      : days<0 ? \`\${Math.abs(days)} hari lewat jatuh tempo\`
+      : days===0 ? "Jatuh tempo hari ini"
+      : \`\${days} hari lagi\`;
+    const balance=depositBalanceFor(d.account_id);
+    const actions=[];
+    if(isCentralUser() && d.status!=="CLOSED"){
+      actions.push(\`<button class="table-action edit" data-deposit-action="edit" data-id="\${d.id}">Edit</button>\`);
+      actions.push(\`<button class="table-action" data-deposit-action="transfer" data-id="\${d.id}">Transfer</button>\`);
+      actions.push(\`<button class="table-action void-action" data-deposit-action="close" data-id="\${d.id}">Tutup</button>\`);
+    }
+
+    return \`<tr>
+      <td>\${escapeHtml(d.institutions?.name||"-")}</td>
+      <td><div class="deposit-account-cell">
+        <strong>\${escapeHtml(d.accounts?.account_name||"-")}</strong>
+        <span>\${escapeHtml(d.bank_name||"-")}\${d.deposit_number?" • "+escapeHtml(d.deposit_number):""}</span>
+      </div></td>
+      <td><strong>\${rupiah(d.principal_amount)}</strong></td>
+      <td><strong class="deposit-current-balance">\${rupiah(balance)}</strong></td>
+      <td>\${Number(d.interest_rate||0).toLocaleString("id-ID",{maximumFractionDigits:4})}% / tahun</td>
+      <td><div class="deposit-date-cell"><strong>\${formatDate(d.maturity_date)}</strong><span>\${escapeHtml(dueText)}</span></div></td>
+      <td><span class="deposit-status \${effective.toLowerCase()}">\${depositStatusLabel(effective)}</span></td>
+      <td><div class="asset-actions">\${actions.join("")||"—"}</div></td>
+    </tr>\`;
+  }).join(""):\`<tr><td colspan="8" class="empty">Belum ada deposito yang sesuai filter.</td></tr>\`;
+}
+
+function renderDepositMovements(){
+  const map=new Map(depositRowsCache.map(d=>[d.account_id,d]));
+  $("depositMovementBody").innerHTML=depositTransferRows.length?depositTransferRows.map(t=>{
+    const src=map.get(t.source_account_id);
+    const dst=map.get(t.destination_account_id);
+    let dep=dst||src;
+    let kind="Mutasi Deposito";
+    let other="-";
+
+    if(dst && !src){
+      kind="Penempatan Masuk";
+      other=t.source_account?.account_name||"-";
+    }else if(src && !dst){
+      kind="Pencairan Keluar";
+      other=t.destination_account?.account_name||"-";
+    }else if(src && dst){
+      dep=src;
+      other=t.destination_account?.account_name||"-";
+    }
+
+    return \`<tr>
+      <td>\${formatDate(t.transaction_date)}</td>
+      <td><strong>\${escapeHtml(t.transaction_number||"-")}</strong></td>
+      <td>\${escapeHtml(dep?.accounts?.account_name||"-")}</td>
+      <td><span class="deposit-movement-kind">\${escapeHtml(kind)}</span></td>
+      <td>\${escapeHtml(other)}</td>
+      <td><strong>\${rupiah(t.amount)}</strong></td>
+      <td><span class="pill \${statusClass(t.status)}">\${escapeHtml(t.status)}</span></td>
+    </tr>\`;
+  }).join(""):\`<tr><td colspan="7" class="empty">Belum ada penempatan atau pencairan deposito.</td></tr>\`;
+}
+
+function setDepositEditMode(active){
+  $("depositFormTitle").textContent=active?"Edit Deposito":"Tambah Akun Deposito";
+  $("saveDepositBtn").textContent=active?"Simpan Perubahan":"Simpan Deposito";
+  $("cancelDepositEditBtn").classList.toggle("hidden",!active);
+  $("depositInstitution").disabled=active;
+  $("depositFormCard").classList.toggle("editing-transaction",active);
+}
+
+function resetDepositForm(){
+  editingDepositId=null;
+  $("depositForm").reset();
+  setDepositEditMode(false);
+  $("depositPlacementDate").value=todayISO();
+  $("depositPrincipalPreview").textContent="Rp0";
+  fillDepositInstitutionOptions();
+}
+
+function startEditDeposit(id){
+  const row=depositRowsCache.find(x=>x.id===id);
+  if(!row) throw new Error("Deposito tidak ditemukan.");
+  if(!isCentralUser()) throw new Error("Hanya pengguna Yayasan yang dapat mengubah deposito.");
+
+  editingDepositId=id;
+  setDepositEditMode(true);
+  $("depositInstitution").value=row.institution_id;
+  $("depositAccountName").value=row.accounts?.account_name||"";
+  $("depositBankName").value=row.bank_name||"";
+  $("depositNumber").value=row.deposit_number||"";
+  $("depositPlacementDate").value=row.placement_date||"";
+  $("depositMaturityDate").value=row.maturity_date||"";
+  $("depositTenorMonths").value=row.tenor_months||"";
+  $("depositInterestRate").value=Number(row.interest_rate||0);
+  $("depositPrincipalAmount").value=Number(row.principal_amount||0);
+  $("depositPrincipalPreview").textContent=rupiah(row.principal_amount||0);
+  $("depositNotes").value=row.notes||"";
+  $("depositFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+async function saveDeposit(){
+  if(!isCentralUser()) throw new Error("Hanya pengguna Yayasan yang dapat menyimpan deposito.");
+
+  const institution_id=$("depositInstitution").value;
+  const account_name=($("depositAccountName").value||"").trim();
+  const bank_name=($("depositBankName").value||"").trim();
+  const deposit_number=($("depositNumber").value||"").trim();
+  const placement_date=$("depositPlacementDate").value;
+  const maturity_date=$("depositMaturityDate").value;
+  const tenor_months=$("depositTenorMonths").value?Number($("depositTenorMonths").value):null;
+  const interest_rate=Number($("depositInterestRate").value||0);
+  const principal_amount=Number($("depositPrincipalAmount").value||0);
+  const notes=($("depositNotes").value||"").trim();
+
+  if(!institution_id||!account_name||!bank_name||!placement_date||!maturity_date){
+    throw new Error("Lengkapi lembaga, nama akun, bank, tanggal penempatan, dan jatuh tempo.");
+  }
+  if(maturity_date<placement_date) throw new Error("Jatuh tempo tidak boleh sebelum tanggal penempatan.");
+  if(principal_amount<0||interest_rate<0) throw new Error("Pokok dan bunga tidak boleh negatif.");
+
+  if(editingDepositId){
+    const {error}=await sb.rpc("update_deposit_account",{
+      p_deposit_id:editingDepositId,
+      p_account_name:account_name,
+      p_bank_name:bank_name,
+      p_deposit_number:deposit_number||null,
+      p_placement_date:placement_date,
+      p_maturity_date:maturity_date,
+      p_tenor_months:tenor_months,
+      p_interest_rate:interest_rate,
+      p_principal_amount:principal_amount,
+      p_notes:notes||null
+    });
+    if(error) throw error;
+    toast("Data deposito berhasil diperbarui.");
+  }else{
+    const {error}=await sb.rpc("create_deposit_account",{
+      p_institution_id:institution_id,
+      p_account_name:account_name,
+      p_bank_name:bank_name,
+      p_deposit_number:deposit_number||null,
+      p_placement_date:placement_date,
+      p_maturity_date:maturity_date,
+      p_tenor_months:tenor_months,
+      p_interest_rate:interest_rate,
+      p_principal_amount:principal_amount,
+      p_notes:notes||null
+    });
+    if(error) throw error;
+    toast(\`Akun deposito dibuat. Tempatkan dana melalui Transfer Internal\${principal_amount?" sebesar "+rupiah(principal_amount):""}.\`);
+  }
+
+  resetDepositForm();
+  await Promise.all([loadDepositModule(),loadDashboard()]);
+}
+
+async function closeDeposit(id){
+  if(!isCentralUser()) throw new Error("Hanya pengguna Yayasan yang dapat menutup deposito.");
+  const row=depositRowsCache.find(x=>x.id===id);
+  if(!row) throw new Error("Deposito tidak ditemukan.");
+
+  const balance=depositBalanceFor(row.account_id);
+  if(Math.abs(balance)>0.005){
+    throw new Error(\`Saldo deposito masih \${rupiah(balance)}. Cairkan melalui Transfer Internal sampai saldo Rp0 terlebih dahulu.\`);
+  }
+
+  if(!confirm(\`Tutup deposito "\${row.accounts?.account_name||"Deposito"}"? Data tetap tersimpan dalam histori.\`)) return;
+
+  const {error}=await sb.rpc("close_deposit_account",{p_deposit_id:id});
+  if(error) throw error;
+  await Promise.all([loadDepositModule(),loadDashboard()]);
+  toast("Deposito ditutup dan akun dinonaktifkan.");
+}
 
 
 /* =========================================================
@@ -5326,6 +5634,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   const incomeVisible=!$("incomeSection").classList.contains("hidden");
   const expenseVisible=!$("expenseSection").classList.contains("hidden");
   const transferVisible=!$("transferSection").classList.contains("hidden");
+  const depositVisible=!$("depositSection").classList.contains("hidden");
   const evidenceVisible=!$("evidenceSection").classList.contains("hidden");
   const assetsVisible=!$("assetsSection").classList.contains("hidden");
   const reportVisible=!$("reportSection").classList.contains("hidden");
@@ -5340,6 +5649,7 @@ $("refreshBtn").addEventListener("click",async()=>{
   if(incomeVisible) await Promise.all([loadDashboard(),loadIncomeTransactions()]);
   else if(expenseVisible) await Promise.all([loadDashboard(),loadExpenseTransactions()]);
   else if(transferVisible) await Promise.all([loadDashboard(),loadTransferModule()]);
+  else if(depositVisible) await Promise.all([loadDashboard(),loadDepositModule()]);
   else if(evidenceVisible) await Promise.all([loadDashboard(),fetchEvidenceTransactions()]);
   else if(assetsVisible) await Promise.all([loadDashboard(),fetchAssets()]);
   else if(reportVisible) await Promise.all([loadDashboard(),fetchReportTransactions()]);
@@ -5359,7 +5669,8 @@ const meta={
   dashboard:["Dashboard","SIMKEU Yayasan Ar-Raudlah Kapedi"],
   pemasukan:["Pemasukan","Catatan seluruh dana masuk"],
   pengeluaran:["Pengeluaran","Catatan dan approval pengeluaran"],
-  transfer:["Transfer Internal","Perpindahan dana antar lembaga"],
+  transfer:["Transfer Internal","Perpindahan dana antar akun dan lembaga"],
+  deposito:["Deposito","Penempatan dana, bunga, jatuh tempo, dan pencairan"],
   bukti:["Bukti Transaksi","Dokumentasi nota, kuitansi, dan invoice"],
   aset:["Aset & Inventaris","Barang milik Yayasan dan lembaga"],
   lembaga:["Lembaga","Kelola unit di bawah Yayasan"],
@@ -5398,6 +5709,7 @@ async function switchView(v){
   $("incomeSection").classList.toggle("hidden",v!=="pemasukan");
   $("expenseSection").classList.toggle("hidden",v!=="pengeluaran");
   $("transferSection").classList.toggle("hidden",v!=="transfer");
+  $("depositSection").classList.toggle("hidden",v!=="deposito");
   $("evidenceSection").classList.toggle("hidden",v!=="bukti");
   $("assetsSection").classList.toggle("hidden",v!=="aset");
   $("reportSection").classList.toggle("hidden",v!=="laporan");
@@ -5412,7 +5724,7 @@ async function switchView(v){
   $("executiveSection").classList.toggle("hidden",v!=="eksekutif");
   $("placeholderSection").classList.toggle(
     "hidden",
-    ["dashboard","pemasukan","pengeluaran","transfer","bukti","aset","laporan","bukukas","lpj","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
+    ["dashboard","pemasukan","pengeluaran","transfer","deposito","bukti","aset","laporan","bukukas","lpj","analitik","lembaga","pengguna","audit","anggaran","tutupbuku","eksekutif"].includes(v)
   );
 
   if(v==="pemasukan"){
@@ -5421,6 +5733,8 @@ async function switchView(v){
     await loadExpenseModule();
   }else if(v==="transfer"){
     await loadTransferModule();
+  }else if(v==="deposito"){
+    await loadDepositModule();
   }else if(v==="bukti"){
     await loadEvidenceModule();
   }else if(v==="aset"){
@@ -5905,6 +6219,55 @@ $("transferTransactionsBody").addEventListener("click",async e=>{
   }catch(err){
     console.error(err);
     toast("Aksi transfer gagal: "+(err.message||"error"));
+  }finally{
+    btn.disabled=false;
+  }
+});
+
+/* Deposit events */
+$("depositPrincipalAmount").addEventListener("input",()=>{
+  $("depositPrincipalPreview").textContent=rupiah(Number($("depositPrincipalAmount").value||0));
+});
+$("depositSearch").addEventListener("input",renderDepositRows);
+$("depositStatusFilter").addEventListener("change",renderDepositRows);
+$("refreshDepositBtn").addEventListener("click",async()=>{
+  await loadDepositModule();
+  toast("Data deposito diperbarui.");
+});
+$("newDepositBtn").addEventListener("click",()=>{
+  resetDepositForm();
+  $("depositFormCard").scrollIntoView({behavior:"smooth",block:"start"});
+  setTimeout(()=>$("depositAccountName").focus(),250);
+});
+$("cancelDepositEditBtn").addEventListener("click",resetDepositForm);
+$("depositForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  $("saveDepositBtn").disabled=true;
+  try{
+    await saveDeposit();
+  }catch(err){
+    console.error(err);
+    toast("Gagal menyimpan deposito: "+(err.message||"error"));
+  }finally{
+    $("saveDepositBtn").disabled=false;
+  }
+});
+$("depositTableBody").addEventListener("click",async e=>{
+  const btn=e.target.closest("[data-deposit-action]");
+  if(!btn)return;
+  btn.disabled=true;
+  try{
+    const id=btn.dataset.id;
+    const action=btn.dataset.depositAction;
+    if(action==="edit") startEditDeposit(id);
+    if(action==="close") await closeDeposit(id);
+    if(action==="transfer"){
+      await switchView("transfer");
+      toast("Pilih akun deposito sebagai sumber atau tujuan Transfer Internal.");
+    }
+  }catch(err){
+    console.error(err);
+    toast("Aksi deposito gagal: "+(err.message||"error"));
   }finally{
     btn.disabled=false;
   }
