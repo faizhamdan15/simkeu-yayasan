@@ -117,11 +117,43 @@
         y-=12;
       }
       const bytes=await pdf.save();
-      const url=URL.createObjectURL(new Blob([bytes],{type:"application/pdf"}));
-      const a=document.createElement("a");
-      a.href=url;a.download="SIMKEU_Bukti_Pengeluaran_APPROVED_"+month+".pdf";
-      document.body.appendChild(a);a.click();a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url),60000);
+      const filename="SIMKEU_Bukti_Pengeluaran_APPROVED_"+month+".pdf";
+      const file=new File([bytes],filename,{type:"application/pdf"});
+      // Pada Android WebView, blob: sering dianggap tautan eksternal tanpa handler.
+      // Jangan otomatis membuka tautan; tampilkan aksi eksplisit untuk gesture pengguna.
+      let actions=byId("monthlyProofReady");
+      if(!actions){
+        actions=document.createElement("div");
+        actions.id="monthlyProofReady";
+        actions.style.cssText="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center";
+        byId("monthlyProofExport").appendChild(actions);
+      }
+      actions.replaceChildren();
+      const message=document.createElement("span");
+      message.textContent="PDF siap ("+Math.ceil(bytes.length/1024)+" KB). Pilih cara menyimpan:";
+      actions.appendChild(message);
+      const downloadBtn=document.createElement("button");
+      downloadBtn.type="button";downloadBtn.className="brand-btn";
+      downloadBtn.textContent="Simpan PDF";
+      downloadBtn.addEventListener("click",()=>{
+        const url=URL.createObjectURL(file);
+        const a=document.createElement("a");
+        a.href=url;a.download=filename;
+        document.body.appendChild(a);a.click();a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),60000);
+      });
+      actions.appendChild(downloadBtn);
+      if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+        const shareBtn=document.createElement("button");
+        shareBtn.type="button";shareBtn.className="secondary-btn";
+        shareBtn.textContent="Bagikan / Simpan ke File (HP)";
+        shareBtn.addEventListener("click",async()=>{
+          try{await navigator.share({files:[file],title:filename});}
+          catch(error){if(error.name!=="AbortError")alert("Gagal membagikan PDF: "+error.message);}
+        });
+        actions.appendChild(shareBtn);
+      }
+      actions.scrollIntoView({behavior:"smooth",block:"nearest"});
     }catch(error){console.error(error);alert("Download PDF gagal: "+(error.message||error));}
     finally{button.disabled=false;button.textContent=old;}
   }
